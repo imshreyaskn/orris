@@ -444,27 +444,25 @@ function run() {
       propose('DEL', parts[1]);
       break;
 
-    case 'GET':
+    case 'GET': {
       if (!parts[1]) { evAppend('red', '[ERR] Usage: get <key>'); break; }
-      (() => {
-        const key = parts[1];
-        const src = nodes.find(n => n.online && n.kv[key] !== undefined);
-        if (src) evAppend('green', `VALUE ${src.kv[key]}`);
-        else     evAppend('red',   `ERR NOT_FOUND`);
-      })();
+      const key = parts[1];
+      const src = nodes.find(n => n.online && n.kv[key] !== undefined);
+      if (src) evAppend('green', `VALUE ${src.kv[key]}`);
+      else     evAppend('red',   `ERR NOT_FOUND`);
       break;
+    }
 
-    case 'KEYS': case 'DUMP':
-      (() => {
-        const allK = [...new Set(nodes.flatMap(n => n.online ? Object.keys(n.kv) : []))].sort();
-        if (!allK.length) { evAppend('dim', 'KEYS (empty)'); break; }
-        const pairs = allK.map(k => {
-          const v = nodes.find(n => n.online && n.kv[k] !== undefined)?.kv[k] || '';
-          return `${k}=${v}`;
-        });
-        evAppend('white', `KEYS ${pairs.join(' | ')}`);
-      })();
+    case 'KEYS': case 'DUMP': {
+      const allK = [...new Set(nodes.flatMap(n => n.online ? Object.keys(n.kv) : []))].sort();
+      if (!allK.length) { evAppend('dim', 'KEYS (empty)'); break; }
+      const pairs = allK.map(k => {
+        const v = nodes.find(n => n.online && n.kv[k] !== undefined)?.kv[k] || '';
+        return `${k}=${v}`;
+      });
+      evAppend('white', `KEYS ${pairs.join(' | ')}`);
       break;
+    }
 
     case 'PING':
       nodes.forEach(n => {
@@ -473,13 +471,12 @@ function run() {
       });
       break;
 
-    case 'LEADER':
-      (() => {
-        const l = nodes.find(n => n.online && n.role === 'LEADER');
-        if (l) evAppend('green', `LEADER ${l.id} 127.0.0.1:${l.port}`);
-        else   evAppend('yellow', `LEADER (none) — election in progress`);
-      })();
+    case 'LEADER': {
+      const l = nodes.find(n => n.online && n.role === 'LEADER');
+      if (l) evAppend('green', `LEADER ${l.id} 127.0.0.1:${l.port}`);
+      else   evAppend('yellow', `LEADER (none) — election in progress`);
       break;
+    }
 
     case 'STATUS': case 'INFO':
       nodes.forEach(n => {
@@ -721,7 +718,7 @@ function drawScreen() {
 const MAX_LOG = 80;
 const logLines = [];
 
-function evAppend(color, msg) {
+function evAppend(color, msg, autoScroll = false) {
   const cls = { green:'c-green', red:'c-red', yellow:'c-yellow', cyan:'c-cyan', white:'c-white', dim:'c-dim', bold:'c-bold' }[color] || '';
   const safe = String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   logLines.push(cls ? `<span class="${cls}">${safe}</span>` : safe);
@@ -729,9 +726,10 @@ function evAppend(color, msg) {
 
   const el = document.getElementById('evlog');
   el.innerHTML = logLines.join('\n');
-  // scroll evlog's parent (the terminal viewport) to bottom to show new output
-  const mt = document.getElementById('main-terminal');
-  mt.scrollTop = mt.scrollHeight;
+  if (autoScroll) {
+    const mt = document.getElementById('main-terminal');
+    mt.scrollTop = mt.scrollHeight;
+  }
 }
 
 // ── Boot sequence (mirrors ensureClusterRunning / clusterStart messages) ──────
@@ -742,7 +740,7 @@ setTimeout(() => {
   evAppend('green', ' [OK] Started node3 (Consensus: 127.0.0.1:8003, Client: 127.0.0.1:9003, PID: ~)');
   setTimeout(() => {
     evAppend('green', '[ELECTION] node1 won quorum (2/3 votes) → LEADER for Term 1');
-    evAppend('');
+    evAppend('', '');
     evAppend('dim', '[Press Enter to refresh dashboard]');
   }, 600);
 }, 300);
