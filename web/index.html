@@ -303,26 +303,32 @@ document.getElementById('speedSel').onchange = e => speed = +e.target.value;
 let prevT = performance.now();
 
 function tick(now) {
-  const dt = (now - prevT) * speed;
+  // Cap dt to 100ms so tab switching / lag never causes artificial timeout jumps
+  const dt = Math.min((now - prevT) * speed, 100);
   prevT = now;
 
+  const leader = nodes.find(n => n.online && n.role === 'LEADER');
+
+  if (leader) {
+    leader.hb -= dt;
+    if (leader.hb <= 0) {
+      leader.hb = 150; // heartbeat pulse every 150ms
+      nodes.forEach(p => {
+        if (p.online && p.id !== leader.id) {
+          p.et = p.etMax; // heartbeat resets election timer
+          p.term = Math.max(p.term, leader.term);
+          if (p.role !== 'LEADER') p.role = 'FOLLOWER';
+        }
+      });
+    }
+  }
+
+  // Count down election timers for followers/candidates
   nodes.forEach(n => {
-    if (!n.online) return;
-    if (n.role === 'LEADER') {
-      n.hb -= dt;
-      if (n.hb <= 0) {
-        n.hb = 300;
-        nodes.forEach(p => {
-          if (p.online && p.id !== n.id) {
-            p.et = p.etMax;
-            p.term = Math.max(p.term, n.term);
-            if (p.role !== 'LEADER') p.role = 'FOLLOWER';
-          }
-        });
-      }
-    } else {
-      n.et -= dt;
-      if (n.et <= 0) holdElection(n);
+    if (!n.online || n.role === 'LEADER') return;
+    n.et -= dt;
+    if (n.et <= 0) {
+      holdElection(n);
     }
   });
 

@@ -1,124 +1,27 @@
 # Orris
 
-> **A fault-tolerant distributed key-value store with Raft consensus and durable Write-Ahead Logging — built entirely from Go's standard library with zero third-party dependencies.**
+> A distributed, fault-tolerant key-value store with Raft consensus and durable Write-Ahead Logging — implemented entirely using the Go standard library with zero third-party dependencies.
 
-🌐 **Live Interactive Web Simulation (Click & Play):** [https://orrisraft.vercel.app](https://orrisraft.vercel.app/)  
-⚡ **Instant Local Launch:** `go run ./cmd/orrisctl`
-
-*Boot a 3-node Raft cluster, elect a leader, and explore consensus with live visual dashboards — online in your browser or locally in your terminal.*
+- **Interactive Web Simulation:** [https://orrisraft.vercel.app](https://orrisraft.vercel.app)
+- **Local Terminal Launch:** `go run ./cmd/orrisctl`
 
 ---
 
-## The Problem
+## Overview
 
-Most distributed systems tutorials teach you to `go get github.com/hashicorp/raft` and call it a day. You end up with a working system, but you have no idea what actually happens when a node crashes, why a stale leader steps down, or how data survives a power failure.
+Orris (`orris`) is a distributed, fault-tolerant key-value storage engine implementing the [Raft consensus algorithm](https://raft.github.io/) from first principles.
 
-The real problems in distributed storage are subtle and deeply unsexy:
+Most distributed systems rely on heavy third-party frameworks (`hashicorp/raft`, `etcd`, `grpc`, `boltdb`) to manage cluster state and disk persistence. Orris demonstrates that a complete distributed consensus engine, linearizable state machine replication, physical disk durability with `fsync`, and real-time observability can be implemented using only Go standard library primitives.
 
-- **Consensus without external libraries.** Who elects the leader when the current one dies? How do you prevent split-brain? How do you ensure no two nodes think they're leader in the same term?
-- **Durability without a storage engine.** Commits acknowledged to the client must survive a crash. You need `fsync`, checksums, and a log that can be safely replayed — not just a map in memory.
-- **Linearizability.** A `GET` after a committed `SET` must return the new value, on any node in the cluster, every time. This requires understanding exactly when a value is "applied" versus just "received."
-- **Safe recovery.** When a crashed node restarts, it must replay its Write-Ahead Log to reconstruct state exactly. A corrupt record in the middle shouldn't destroy the entire history.
-- **Zero-dependency constraint.** Every serious distributed systems library (`hashicorp/raft`, `etcd`, `grpc`, `bolt`, `zap`, `protobuf`) is off-limits. Everything must be built from primitives.
+### Core Capabilities
 
-**Orris solves all of this using only Go's standard library.**
-
----
-
-## What Orris Is
-
-Orris (`orris`) is a distributed, fault-tolerant key-value store implementing the [Raft consensus algorithm](https://raft.github.io/) from scratch. It provides:
-
-- **Strong consistency**: all reads and writes are linearizable across the cluster
-- **Automatic leader election** with randomized timeouts to prevent split votes
-- **Log replication** with quorum commit and `NextIndex` backtracking
-- **Crash recovery** via a durable Write-Ahead Log with CRC32 checksums and `fsync`
-- **Fault tolerance**: the cluster continues operating as long as a majority of nodes are alive (3-node: tolerates 1 crash; 5-node: tolerates 2 crashes)
-- **A live interactive visualizer** to watch everything happen in real-time
-
-And it does all of this with **zero third-party dependencies**. The `go.mod` has no `require` block. It verifies with `go list -m all` returning a single line.
-
----
-
-## How It Works
-
-### The Raft Consensus Algorithm
-
-Raft solves distributed consensus by decomposing it into three relatively independent sub-problems:
-
-#### 1. Leader Election
-
-Every node starts as a **Follower**. If no heartbeat is received within a randomized timeout (300–600ms), the node becomes a **Candidate**, increments its term, and requests votes from peers. A node wins if it receives votes from a majority of the cluster. The randomization prevents two candidates from always racing each other indefinitely.
-
-```
-FOLLOWER --[election timeout]--> CANDIDATE --[quorum votes]--> LEADER
-   ^                                                               |
-   |                               [term out-of-date / new leader]|
-   +---------------------------------------------------------------+
-```
-
-If a split vote occurs (two candidates get equal votes), the election times out and restarts with a new incremented term. Raft's guarantee: **at most one leader per term**.
-
-#### 2. Log Replication
-
-The Leader receives all writes. When a client sends `SET user Alice`:
-
-1. Leader appends the entry to its own log with the current term
-2. Leader sends `AppendEntries` RPCs to all followers in parallel
-3. Each follower appends the entry to its own log and acknowledges
-4. Once a **majority** (quorum) acknowledges, the Leader advances its `CommitIndex`
-5. The entry is applied to the in-memory KV state machine
-6. The client receives `OK COMMITTED`
-
-Followers never apply entries until the Leader tells them via the next heartbeat's `LeaderCommit` field. This ensures linearizability: a value is only readable after it's been committed by a majority.
-
-#### 3. Safety
-
-The key safety property: **a leader must have all committed entries**. Orris enforces this by having candidates include their last log index and term in vote requests. A node only votes for a candidate whose log is at least as up-to-date as its own. This prevents a node with stale data from becoming leader and overwriting committed entries.
-
----
-
-### The Write-Ahead Log (WAL)
-
-In-memory state dies on crash. The WAL is what makes Orris durable.
-
-Every change to Raft state is written to `data/nodeX/wal.log` **before** it's acknowledged. The WAL stores four record types:
-
-| Record Type | When Written | Contents |
-| :--- | :--- | :--- |
-| `STATE` | On term increment or vote cast | `CurrentTerm`, `VotedFor` |
-| `ENTRY` | On log append | Full `LogEntry` (index, term, op, key, value) |
-| `COMMIT` | On `CommitIndex` advancement | New `CommitIndex` |
-| `TRUNCATE` | On log conflict resolution | Truncation point index |
-
-Each record is framed as:
-
-```
-[ 4 bytes: payload length ][ 4 bytes: IEEE CRC32 checksum ][ N bytes: Gob-encoded payload ]
-```
-
-On startup, `ReadAll()` replays every record in order. If any record has a checksum mismatch (e.g., from an incomplete write during a power failure), replay stops and the corrupt tail is truncated. The node recovers to the last known-good state and rejoins the cluster, catching up via Raft replication.
-
-This means: **an `OK COMMITTED` response guarantees the write survived a crash**.
-
----
-
-### The Client Protocol
-
-Orris uses a simple line-delimited plaintext TCP protocol on ports 9001-9003:
-
-```
-SET key value        →  OK COMMITTED
-GET key              →  VALUE <value> | ERR NOT_FOUND
-DEL key              →  OK COMMITTED
-PING                 →  PONG
-STATUS               →  NODE node1 ROLE LEADER TERM 3 COMMIT 14 APPLIED 14 LOGLEN 15
-KEYS                 →  KEYS user=Alice | role=Admin
-LOGS                 →  LOGS [0]T1:SET:user=Alice | [1]T1:SET:role=Admin
-LEADER               →  LEADER node1 127.0.0.1:9001
-```
-
-Write operations (`SET`, `DEL`) are automatically routed to the active leader by `orrisctl`. Read operations (`GET`, `STATUS`, `KEYS`) can be served by any node.
+- **Linearizable Consistency:** Reads and writes are strictly ordered and synchronized across the cluster.
+- **Automated Leader Election:** Randomized election timeouts (300ms–600ms) prevent split-vote deadlocks and ensure rapid failover.
+- **Quorum-Based Log Replication:** State transitions require explicit acknowledgement from a majority `(N/2 + 1)` of nodes before commit.
+- **Physical Crash Durability:** Write-Ahead Log (WAL) persistence with IEEE CRC32 checksums, binary Gob encoding, and synchronous `file.Sync()` (`fsync`) calls.
+- **Fault Tolerance:** A 3-node cluster tolerates 1 node failure; a 5-node cluster tolerates 2 concurrent failures without service interruption.
+- **Interactive Visual Control Plane:** Built-in terminal dashboard and web visualizer for real-time monitoring and chaos testing.
+- **Zero Third-Party Dependencies:** Empty `require` block in `go.mod`. Verified via `go list -m all`.
 
 ---
 
@@ -129,21 +32,21 @@ Write operations (`SET`, `DEL`) are automatically routed to the active leader by
                      │           orrisctl (CLI/TUI)         │
                      │  set/get/del/wals/kill/spawn/bench   │
                      └──────────────┬──────────────────────┘
-                                    │ TCP plaintext protocol
+                                    │ Plaintext TCP Protocol
                      ┌──────────────▼──────────────────────┐
-                     │          Client Server               │
-                     │    (internal/client/server.go)       │
+                     │          Client Wire Server         │
+                     │      (internal/client/server.go)    │
                      └──────────────┬──────────────────────┘
-                                    │ Proposal channel
+                                    │ Non-blocking Proposals
                      ┌──────────────▼──────────────────────┐
-                     │            Raft Core                 │
+                     │               Raft Core             │
                      │  ┌──────────────────────────────┐   │
                      │  │  Election   │  Replication   │   │
                      │  │  (election.go) (replication.go)  │
                      │  └──────────────────────────────┘   │
                      │  ┌──────────────────────────────┐   │
-                     │  │   Apply Loop  (apply.go)     │   │
-                     │  │   Event-driven, not polling  │   │
+                     │  │   Apply Loop (apply.go)      │   │
+                     │  │   Event-driven notification  │   │
                      │  └──────────────┬───────────────┘   │
                      └─────────────────┼───────────────────┘
                           ┌────────────┼────────────┐
@@ -156,51 +59,98 @@ Write operations (`SET`, `DEL`) are automatically routed to the active leader by
                    └─────────┘  └─────────┘  └──────────┘
 ```
 
-### Package Structure
+### Component Breakdown
 
-```
-orris/
-├── cmd/
-│   ├── orrisd/main.go       # Node daemon: flags, signal handling, slog, lifecycle
-│   └── orrisctl/main.go     # CLI + live TUI dashboard + cluster management
-│
-├── internal/
-│   ├── storage/
-│   │   └── wal.go           # WAL: length-prefix + CRC32 + Gob + fsync + replay
-│   ├── kv/
-│   │   └── store.go         # Thread-safe in-memory KV state machine (RWMutex)
-│   ├── raft/
-│   │   ├── state.go         # Node struct, NodeState enum, accessor methods
-│   │   ├── node.go          # Lifecycle: NewNode, Start, Stop, WAL recovery
-│   │   ├── election.go      # Election timer, RequestVote RPC, vote counting
-│   │   ├── replication.go   # AppendEntries RPC, NextIndex backtracking, commit
-│   │   ├── apply.go         # Event-driven apply loop (applyNotify channel)
-│   │   └── client.go        # Client proposal handler with deadline & routing
-│   └── transport/
-│       ├── rpc.go           # Consensus RPC types (RequestVote, AppendEntries)
-│       └── tcp.go           # TCP server/client, Gob framing, connection timeouts
-│
-├── tests/
-│   ├── wal_test.go          # WAL persistence & CRC32 corruption resilience
-│   ├── raft_test.go         # 20-goroutine concurrent state machine tests
-│   └── integration_test.go  # 3-node in-process cluster: write, replicate, failover
-│
-├── go.mod                   # Go 1.21 — zero require statements
-├── Makefile                 # build, test, demo, check targets
-├── STDLIB.md                # Full standard library substitution log
-└── README.md
-```
+1. **Consensus Engine (`internal/raft/`)**:
+   - `state.go`: State definitions (`Follower`, `Candidate`, `Leader`), term tracking, and concurrency primitives.
+   - `election.go`: Randomized election timers, candidate vote collection, and term promotion.
+   - `replication.go`: `AppendEntries` RPC dispatch, `NextIndex` backtracking, and quorum commit index resolution.
+   - `apply.go`: Event-driven state machine applier using dedicated notify channels to eliminate polling latency.
+   - `client.go`: Proposal coordination, write routing to active leader, and request timeout handling.
+
+2. **Storage Layer (`internal/storage/`)**:
+   - `wal.go`: Length-prefixed binary records, IEEE CRC32 checksum verification, Gob serialization, and `fsync` durability.
+   - Handles four record types: `STATE`, `ENTRY`, `COMMIT`, and `TRUNCATE`.
+   - Automatic log replay and corrupted tail truncation on crash recovery.
+
+3. **Transport Layer (`internal/transport/`)**:
+   - `tcp.go` & `rpc.go`: Point-to-point TCP RPC layer using streaming Gob encoders with connection timeouts and socket deadline enforcement.
+
+4. **Client Interface (`internal/client/` & `cmd/`)**:
+   - `server.go`: Line-delimited plaintext TCP server supporting `SET`, `GET`, `DEL`, `PING`, `STATUS`, `KEYS`, `LOGS`, and `LEADER`.
+   - `orrisd`: Node daemon process with structured `log/slog` logging and clean signal termination.
+   - `orrisctl`: Control plane client, cluster orchestrator, concurrent benchmarking tool, and interactive visualizer.
 
 ---
 
-## Getting Started
+## Consensus & Durability Mechanics
+
+### 1. Leader Election
+
+Nodes initialize in the `Follower` state. If a follower receives no heartbeat within its randomized election timeout (300ms–600ms), it transitions to `Candidate`, increments its `CurrentTerm`, votes for itself, and broadcasts `RequestVote` RPCs to all peers.
+
+```
+FOLLOWER ──[ election timeout ]──> CANDIDATE ──[ quorum votes ]──> LEADER
+   ^                                                                  │
+   │                                  [ higher term / valid leader ]  │
+   └──────────────────────────────────────────────────────────────────┘
+```
+
+A candidate becomes `Leader` upon receiving votes from a strict majority `(N/2 + 1)`. Raft guarantees that at most one leader can be elected in any given term.
+
+### 2. Log Replication & Commit Protocol
+
+All state mutations flow through the leader:
+
+1. **Client Proposal:** Client submits `SET key value` to the cluster.
+2. **Local Append:** The leader appends the entry to its local log and writes it to disk.
+3. **Parallel Replication:** The leader sends `AppendEntries` RPCs to all followers.
+4. **Follower Persistence:** Followers append the entry to their on-disk WAL and acknowledge the RPC.
+5. **Quorum Commit:** Once a majority of nodes acknowledge, the leader advances its `CommitIndex`.
+6. **State Machine Execution:** The entry is applied to the in-memory KV store and the client receives `OK COMMITTED`.
+
+Followers apply committed entries during subsequent heartbeat rounds when the leader communicates its updated `LeaderCommit`.
+
+### 3. Write-Ahead Log (WAL) Format
+
+Every state mutation and term change is written to `data/nodeX/wal.log` before consensus acknowledgement.
+
+```
++-------------------+--------------------+------------------------+
+| Length (4 Bytes)  | CRC32 (4 Bytes)    | Payload (N Bytes, Gob) |
+| Big-Endian uint32 | IEEE 802.3 Checksum| Binary Encoded Struct  |
++-------------------+--------------------+------------------------+
+```
+
+On node restart, `ReadAll()` sequentially reads each frame, computes the CRC32 checksum, and validates payload integrity. If an uncompleted write is detected at the tail (e.g. from power loss during disk write), the corrupt segment is truncated, allowing the node to recover to the last valid state and synchronize missing entries from the leader.
+
+---
+
+## Wire Protocol
+
+The client server listens on ports `9001` through `9003` (and onward for larger clusters) using a plaintext line-delimited protocol:
+
+| Command | Syntax | Description | Example Response |
+| :--- | :--- | :--- | :--- |
+| `SET` | `SET <key> <value>` | Writes or updates a key via Raft consensus | `OK COMMITTED` |
+| `GET` | `GET <key>` | Reads a key from local state machine | `VALUE Alice` or `ERR NOT_FOUND` |
+| `DEL` | `DEL <key>` | Deletes a key via Raft consensus | `OK COMMITTED` |
+| `KEYS` | `KEYS` | Dumps all keys stored in state machine | `KEYS user=Alice \| role=Admin` |
+| `PING` | `PING` | Health check and round-trip latency test | `PONG` |
+| `LEADER` | `LEADER` | Queries current term and active leader | `ROLE LEADER TERM 3` |
+| `STATUS` | `STATUS` | Dumps Raft term, commit, and log lengths | `NODE node1 ROLE LEADER TERM 3 COMMIT 14 ...` |
+| `LOGS` | `LOGS` | Dumps replicated log timeline | `LOGS [0]T1:SET:user=Alice \| [1]T1:SET:...` |
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
 - Go 1.21 or later
-- No other dependencies — ever
+- No external packages or package managers required
 
-### One-Command Launch
+### 1. Launch with Interactive Visualizer
 
 ```bash
 git clone https://github.com/imshreyaskn/orris.git
@@ -208,160 +158,74 @@ cd orris
 go run ./cmd/orrisctl
 ```
 
-Orris auto-detects whether the cluster is running. If not, it spawns all nodes, waits for leader election, and opens the interactive console automatically.
+If no cluster is running, `orrisctl` automatically compiles the daemon, starts a 3-node cluster in the background, coordinates leader election, and opens the live interactive dashboard.
 
-### Build Binaries
+### 2. Interactive Browser Simulation
 
-```bash
-go build -o bin/orrisd ./cmd/orrisd
-go build -o bin/orrisctl ./cmd/orrisctl
-```
+An in-browser replica of the visualizer is available at:
+**[https://orrisraft.vercel.app](https://orrisraft.vercel.app)**
 
-Or use Make:
+---
 
-```bash
-make build
-```
+## Operations & Command Reference
 
-### Start & Stop the Cluster Manually
+### Cluster Management
 
 ```bash
 # Start a 3-node cluster
 go run ./cmd/orrisctl start
 
-# Start a 5-node cluster
+# Start an N-node cluster (e.g. 5 nodes)
 go run ./cmd/orrisctl start 5
 
-# Stop all nodes
+# Stop all running cluster nodes
 go run ./cmd/orrisctl stop
+
+# Run automated end-to-end demo (start -> write -> failover -> verify)
+go run ./cmd/orrisctl demo
 ```
 
----
+### Interactive REPL Commands
 
-## Interactive Visual Console
-
-You can run the live dashboard in two ways:
-1. **In your browser (zero setup):** Open [https://orrisraft.vercel.app](https://orrisraft.vercel.app/) to click and play immediately.
-2. **In your terminal:** Run `go run ./cmd/orrisctl` to interact with real background Go processes.
+Inside the `orris>` prompt:
 
 ```text
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║  ORRIS CLUSTER VISUALIZER  [Zero-Dependency Raft Consensus]          TIME: 18:04:15  ║
-╚══════════════════════════════════════════════════════════════════════════════════════╝
-
---- [ CLUSTER NODES & RAFT STATE ] ---------------------------------------------------
- * Node node1 on 127.0.0.1:9001 (ping: 1.2ms)
-   Role:  [LEADER]    Term: 3   CommitIndex: 12   Applied: 12   LogEntries: 13
-
- * Node node2 on 127.0.0.1:9002 (ping: 0.9ms)
-   Role:  [FOLLOWER]  Term: 3   CommitIndex: 12   Applied: 12   LogEntries: 13
-
- * Node node3 on 127.0.0.1:9003 (ping: 1.1ms)
-   Role:  [FOLLOWER]  Term: 3   CommitIndex: 12   Applied: 12   LogEntries: 13
-
---- [ REPLICATED STATE MACHINE (KV STORE) ] -------------------------------------------
-   KEY              | node1            | node2            | node3
-   -----------------------------------------------------------------------
-   author           | Shreyas          | Shreyas          | Shreyas
-   project          | orris            | orris            | orris
-
---- [ RAFT WAL & LOG ENTRIES (Recent 6 of 13 Entries) ] --------------------------------
-   INDEX    | TERM     | OP       | KEY / VALUE                     | COMMIT STATE
-   -------------------------------------------------------------------------
-   #8       | Term 2   | SET      | author = Shreyas                | [COMMITTED]
-   #9       | Term 2   | SET      | project = orris                 | [COMMITTED]
-
-COMMANDS: set <k> <v> | get <k> | del <k> | keys | wals | wal <node> | kill <node|leader> | spawn <node> | bench [n] [c] | help | exit
-orris>
-```
-
-### Full Command Reference
-
-**KV Operations**
-
-| Command | Description |
-| :--- | :--- |
-| `set <key> <value>` | Route write to leader, commit to quorum, update dashboard |
-| `get <key>` | Read from any online node |
-| `del <key>` | Delete key via consensus |
-| `keys` / `dump` | List all keys and their values across all nodes |
-
-**Cluster Management**
-
-| Command | Description |
-| :--- | :--- |
-| `start [N]` | Spawn an N-node cluster (default: 3) |
-| `stop` | Gracefully terminate all nodes |
-| `kill <node\|leader>` | Crash a specific node or the current leader |
-| `spawn <node>` | Restart a crashed node, it replays its WAL and rejoins |
-| `status` / `info` | Print live Role, Term, CommitIndex, Latency for all nodes |
-| `ping` | Ping all nodes and show round-trip latencies |
-| `leader` | Identify the current consensus leader |
-
-**WAL & Diagnostics**
-
-| Command | Description |
-| :--- | :--- |
-| `wals` | Compare on-disk WAL file sizes and record counts across all nodes |
-| `wal <node>` | Inspect raw on-disk WAL records (STATE, ENTRY, COMMIT, TRUNCATE) |
-| `logs` | Print the full replicated log timeline with commit status |
-
-**Tools**
-
-| Command | Description |
-| :--- | :--- |
-| `bench [n] [c]` | Concurrent write benchmark: `n` total writes, `c` parallel workers |
-| `watch` / `top` | Live 1-second auto-refreshing dashboard mode |
-| `help` | Full command reference |
-| `exit` | Quit |
-
----
-
-## Chaos Engineering
-
-The most interesting way to run Orris is to break it and watch it self-heal:
-
-```bash
-# Terminal 1: Open the visualizer
-go run ./cmd/orrisctl
-
-# Inside the console:
 orris> set user Alice
 [COMMITTED] Set 'user' = 'Alice' via 127.0.0.1:9001 (latency: 11ms)
 
-orris> kill leader
-[CHAOS] Killed active leader node1 (127.0.0.1:9001, PID: 12345)
+orris> get user
+VALUE Alice
 
-# Watch the dashboard: Term increments, node2 or node3 becomes leader
-# The cluster continues to serve writes within ~600ms
+orris> kill leader
+[CHAOS] Killed active leader node1 (127.0.0.1:9001)
 
 orris> set user Bob
 [COMMITTED] Set 'user' = 'Bob' via 127.0.0.1:9002 (latency: 13ms)
 
 orris> spawn node1
- [OK] Started node1 (Consensus: 127.0.0.1:8001, Client: 127.0.0.1:9001, PID: 12400)
+[OK] Started node1 (Consensus: 127.0.0.1:8001, Client: 127.0.0.1:9001)
 
-# node1 replays its WAL, catches up with the cluster, and returns as FOLLOWER
+orris> wals
+=== ALL NODE WRITE-AHEAD LOG (WAL) COMPARISON ===
+   NODE       | DISK SIZE    | RECORDS    | LAST TERM    | LOG ENTRIES     
+   ------------------------------------------------------------------------
+   node1      | 1420 B       | 18         | 2            | 8               
+   node2      | 1420 B       | 18         | 2            | 8               
+   node3      | 1420 B       | 18         | 2            | 8               
 ```
-
-Or run the full automated demo:
-
-```bash
-go run ./cmd/orrisctl demo
-```
-
-This executes all four steps automatically: cluster bootstrap, data replication, leader kill, and post-failover state verification.
 
 ---
 
 ## Benchmarking
 
+Run concurrent write performance benchmarks directly from the CLI:
+
 ```bash
-# 100 writes, 10 concurrent workers
+# Execute 100 writes across 10 concurrent workers
 go run ./cmd/orrisctl bench 100 10
 ```
 
-Or inside the console:
+Inside the interactive console:
 
 ```text
 orris> bench 200 20
@@ -369,28 +233,32 @@ Running concurrent benchmark: 200 writes with concurrency 20...
 [OK] Benchmark Finished: 200/200 committed in 4.2s (~47.6 ops/sec, 0 failed)
 ```
 
-Throughput is bounded by Raft's consensus round-trip (leader → quorum → commit → apply) rather than raw disk I/O. Each committed write requires a full `fsync` to disk on the leader before acknowledgement.
+Throughput is governed by network consensus round-trips and physical disk synchronization (`file.Sync()`) on write operations.
 
 ---
 
-## Testing
+## Testing & Verification
+
+Run the test suite including persistence, state machine concurrency, corruption recovery, and multi-node failover:
 
 ```bash
 go test -v -count=1 ./...
 ```
 
-Tests cover:
+### Test Coverage Summary
 
-| Test | File | What It Verifies |
+| Test Suite | Source File | Verification Scope |
 | :--- | :--- | :--- |
-| `TestWALPersistence` | `wal_test.go` | Write, close, reopen, and verify all records survive |
-| `TestWALCorruptionResilience` | `wal_test.go` | Inject byte-level corruption, verify truncation at corrupt tail |
-| `TestKVStoreConcurrency` | `raft_test.go` | 20 goroutines hammering the state machine concurrently |
-| `TestClusterReplicationAndFailover` | `integration_test.go` | Full 3-node in-process cluster: write → replicate → kill leader → elect new leader → verify state |
+| `TestWALPersistence` | `tests/wal_test.go` | Verifies full state and log record recovery across file reopen cycles |
+| `TestWALCorruptionResilience` | `tests/wal_test.go` | Injects bit-level corruptions and verifies safe recovery at corruption boundary |
+| `TestKVStoreConcurrency` | `tests/raft_test.go` | Exercises concurrent state machine reads and writes across 20 goroutines |
+| `TestClusterReplicationAndFailover` | `tests/integration_test.go` | In-process 3-node cluster: write replication, leader termination, term reelection, and state verification |
 
 ---
 
-## Zero Dependencies — Verified
+## Dependency Verification
+
+Verify zero third-party dependencies:
 
 ```bash
 go list -m all
@@ -398,65 +266,42 @@ go list -m all
 
 Output:
 
-```
+```text
 orris
 ```
 
-That's it. No `hashicorp/raft`. No `etcd`. No `grpc`. No `bolt`. No `protobuf`. No `zap`. No `testify`.
+### Standard Library Substitution Mapping
 
-| What You'd Normally Import | What Orris Uses Instead |
-| :--- | :--- |
-| `hashicorp/raft` / `etcd/raft` | `sync`, `time`, goroutines, channels |
-| `google.golang.org/grpc` | `net.Listen` + `net.DialTimeout` + `encoding/gob` |
-| `boltdb/bolt` / `pebble` | `os.OpenFile` + `binary.BigEndian` + `hash/crc32` + `file.Sync()` |
-| `google/protobuf` / `msgpack` | `encoding/gob` + `bytes.Buffer` |
-| `spf13/cobra` | `flag` |
-| `uber-go/zap` / `logrus` | `log/slog` |
-| `stretchr/testify` | `testing` |
-| `uber-go/atomic` | `sync/atomic` |
+| Domain | Standard Library Implementation | Common Third-Party Alternative |
+| :--- | :--- | :--- |
+| Distributed Consensus | `sync.Mutex`, `time.Timer`, `time.Ticker`, channels | `hashicorp/raft`, `etcd/raft` |
+| RPC Networking | `net.Listen`, `net.DialTimeout`, `encoding/gob` | `google.golang.org/grpc` |
+| Durable Storage | `os.OpenFile`, `encoding/binary`, `hash/crc32`, `file.Sync()` | `boltdb/bolt`, `cockroachdb/pebble` |
+| Serialization | `encoding/gob`, `bytes.Buffer` | `google.golang.org/protobuf` |
+| CLI Parsing | `flag` | `spf13/cobra` |
+| Structured Logging | `log/slog` | `uber-go/zap`, `sirupsen/logrus` |
+| Testing Assertions | `testing` (`t.Fatalf`, `t.TempDir`) | `stretchr/testify` |
+| Atomic Operations | `sync/atomic` | `uber-go/atomic` |
 
-See [`STDLIB.md`](STDLIB.md) for the full annotated substitution log.
-
----
-
-## Key Design Decisions
-
-**Why plaintext TCP instead of HTTP/gRPC?**
-Simplicity and zero dependencies. A `bufio.Scanner` reading newline-delimited commands is auditable in 10 lines. HTTP adds framing, headers, and encoding overhead. gRPC requires protobuf compilation and a runtime dependency.
-
-**Why Gob encoding for consensus RPCs?**
-`encoding/gob` is part of the standard library, type-safe, and handles nested structs. It's not the most efficient serialization format, but it eliminates the protobuf compiler toolchain entirely.
-
-**Why CRC32 and not CRC64 or SHA256?**
-CRC32 catches the entire class of corruption we care about: incomplete writes, partial overwrites, and disk bit flips. It's in the standard library (`hash/crc32`), 4 bytes per record, and fast enough to add no measurable overhead on modern hardware. Cryptographic hashing would be overkill for write integrity on trusted storage.
-
-**Why event-driven apply instead of a polling loop?**
-The original implementation used `time.After(50ms)` to periodically check if `CommitIndex > LastApplied`. This creates GC pressure (a new timer allocation every 50ms, never garbage collected if not drained) and adds up to 50ms of unnecessary commit latency. The current implementation uses an `applyNotify` channel. When `CommitIndex` advances, the replication goroutine signals the apply loop, which wakes up instantly and applies all committed entries.
-
-**Why randomized election timeouts?**
-If all nodes used the same election timeout and the leader crashed, they'd all start elections simultaneously and vote-split indefinitely. Randomization in the 300–600ms range ensures that, statistically, one node fires first and wins before the others start their elections.
+Detailed substitution rationale and performance notes are documented in [`STDLIB.md`](STDLIB.md).
 
 ---
 
-## Makefile Targets
+## Makefile Reference
 
 ```bash
-make build        # Build both binaries into bin/
-make test         # Run all tests (go test -v ./...)
-make check        # go vet + go build (static analysis)
-make demo         # Full end-to-end demo with failover
-make visualizer   # Launch interactive dashboard
-make start        # Boot 3-node cluster
-make stop         # Stop all cluster nodes
-make clean        # Remove bin/ and data/
+make build        # Compile orrisd and orrisctl binaries into bin/
+make test         # Run all unit and integration tests
+make check        # Run go vet static analysis
+make demo         # Execute automated end-to-end consensus demo
+make visualizer   # Launch interactive terminal visualizer
+make start        # Boot default 3-node cluster
+make stop         # Stop all cluster node processes
+make clean        # Remove bin/ binaries and runtime data/ directories
 ```
 
 ---
 
 ## License
 
-MIT
-
----
-
-*Built from scratch. No shortcuts. All primitives.*
+MIT License. See `LICENSE` for details.
