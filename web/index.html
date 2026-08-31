@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orris — Interactive Raft Consensus & KV Visualizer</title>
+  <style>
+    :root {
+      --bg-main: #0a0d14;
+      --bg-card: #121824;
+      --bg-card-header: #182234;
+      --border-color: #1e2d42;
+      --text-main: #e2e8f0;
+      --text-dim: #64748b;
+      --cyan: #06b6d4;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --purple: #a855f7;
+      --mono-font: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: var(--mono-font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 1.5rem;
+    }
+
+    header {
+      border: 1px solid var(--cyan);
+      background: linear-gradient(180deg, rgba(6, 182, 212, 0.1) 0%, rgba(10, 13, 20, 0.8) 100%);
+      padding: 1rem 1.5rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+    }
+
+    .title-area h1 {
+      font-size: 1.25rem;
+      color: var(--cyan);
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .title-area p {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-top: 0.2rem;
+    }
+
+    .header-badges {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .badge-cyan { background: rgba(6, 182, 212, 0.2); color: var(--cyan); border: 1px solid var(--cyan); }
+    .badge-green { background: rgba(16, 185, 129, 0.2); color: var(--green); border: 1px solid var(--green); }
+
+    /* Main Grid Layout */
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .grid-container { grid-template-columns: 1fr; }
+    }
+
+    /* Node Cards */
+    .node-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .node-card.leader {
+      border-color: var(--green);
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+    }
+
+    .node-card.candidate {
+      border-color: var(--yellow);
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
+    }
+
+    .node-card.offline {
+      border-color: var(--red);
+      opacity: 0.6;
+    }
+
+    .node-header {
+      background: var(--bg-card-header);
+      padding: 0.75rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .node-title {
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      display: inline-block;
+    }
+
+    .node-card.offline .status-dot { background: var(--red); }
+    .node-card.candidate .status-dot { background: var(--yellow); }
+
+    .node-body {
+      padding: 1rem;
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      flex: 1;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+    }
+
+    .metric-label { color: var(--text-dim); }
+    .metric-val { font-weight: 600; }
+
+    .timer-bar-container {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 0.3rem;
+    }
+
+    .timer-bar {
+      height: 100%;
+      background: var(--cyan);
+      width: 100%;
+      transition: width 0.1s linear;
+    }
+
+    .node-actions {
+      padding: 0.75rem 1rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    button {
+      font-family: inherit;
+      font-size: 0.75rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: 4px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-card-header);
+      color: var(--text-main);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+
+    button:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--text-main);
+    }
+
+    button.btn-danger {
+      border-color: rgba(239, 68, 68, 0.5);
+      color: var(--red);
+    }
+    button.btn-danger:hover {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: var(--red);
+    }
+
+    button.btn-success {
+      border-color: rgba(16, 185, 129, 0.5);
+      color: var(--green);
+    }
+    button.btn-success:hover {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: var(--green);
+    }
+
+    button.btn-primary {
+      background: var(--cyan);
+      color: #000;
+      border: none;
+    }
+    button.btn-primary:hover {
+      background: #22d3ee;
+    }
+
+    /* Lower Section: Controls + Logs + KV Matrix */
+    .dashboard-lower {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 1024px) {
+      .dashboard-lower { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      background: var(--bg-card-header);
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .panel-body {
+      padding: 1rem;
+      flex: 1;
+      overflow-x: auto;
+    }
+
+    /* CLI Controls */
+    .cli-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .cli-input {
+      flex: 1;
+      background: var(--bg-main);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      color: var(--cyan);
+      padding: 0.5rem 0.75rem;
+      font-family: inherit;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    .cli-input:focus {
+      border-color: var(--cyan);
+    }
+
+    .quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    th {
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.7rem;
+    }
+
+    .val-active { color: var(--green); font-weight: 600; }
+    .val-nil { color: var(--text-dim); }
+    .val-offline { color: var(--red); font-weight: 600; }
+
+    /* Event Log Terminal */
+    .terminal-logs {
+      background: var(--bg-main);
+      padding: 0.75rem;
+      border-radius: 6px;
+      height: 160px;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      line-height: 1.4;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .log-item { margin-bottom: 0.2rem; }
+    .log-time { color: var(--text-dim); margin-right: 0.5rem; }
+    .log-ok { color: var(--green); }
+    .log-warn { color: var(--yellow); }
+    .log-chaos { color: var(--red); font-weight: 700; }
+    .log-info { color: var(--cyan); }
+
+    .speed-control {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="title-area">
+      <h1>ORRIS CLUSTER PLAYGROUND</h1>
+      <p>Interactive Raft Consensus, Distributed KV Replication & WAL Simulator</p>
+    </div>
+    <div class="header-badges">
+      <div class="speed-control">
+        <span>Speed:</span>
+        <select id="simSpeed" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: inherit;">
+          <option value="1">1x (Real-time)</option>
+          <option value="0.5">0.5x (Slow-mo)</option>
+          <option value="2">2x (Fast)</option>
+        </select>
+      </div>
+      <span class="badge badge-cyan">Zero Dependencies</span>
+      <span class="badge badge-green" id="clusterStatusBadge">Cluster Healthy</span>
+    </div>
+  </header>
+
+  <!-- Node Grid -->
+  <div class="grid-container" id="nodesContainer">
+    <!-- Generated by JS -->
+  </div>
+
+  <!-- Lower Dashboard -->
+  <div class="dashboard-lower">
+
+    <!-- Replicated State Machine (KV Store) -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>REPLICATED STATE MACHINE (KV STORE)</span>
+        <span style="font-size: 0.75rem; color: var(--text-dim);" id="keyCountBadge">0 keys</span>
+      </div>
+      <div class="panel-body">
+        <table id="kvTable">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Node 1</th>
+              <th>Node 2</th>
+              <th>Node 3</th>
+            </tr>
+          </thead>
+          <tbody id="kvTableBody">
+            <tr>
+              <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 2rem;">
+                No keys stored yet. Propose a write below (e.g. SET user Alice).
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Cluster Controls & Interactive CLI -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>INTERACTIVE REPL & CHAOS ENGINEERING</span>
+      </div>
+      <div class="panel-body">
+        <form class="cli-bar" id="cliForm" onsubmit="event.preventDefault(); handleCommand();">
+          <input type="text" class="cli-input" id="cliInput" placeholder="Enter command: set <k> <v> | get <k> | del <k> | kill leader | bench" autofocus>
+          <button type="submit" class="btn-primary">Execute</button>
+        </form>
+
+        <div class="quick-actions">
+          <button onclick="executeAction('SET user Alice')">SET user Alice</button>
+          <button onclick="executeAction('SET project Orris')">SET project Orris</button>
+          <button onclick="executeAction('GET user')">GET user</button>
+          <button onclick="executeAction('DEL user')">DEL user</button>
+          <button class="btn-danger" onclick="executeAction('kill leader')">⚡ Kill Leader</button>
+          <button class="btn-success" onclick="executeAction('spawn all')">🟢 Revive All</button>
+          <button onclick="executeAction('bench 20 4')">🚀 Benchmark (20 writes)</button>
+        </div>
+
+        <div class="terminal-logs" id="terminalLogs">
+          <div class="log-item"><span class="log-time">[00:00:00]</span> <span class="log-ok">[INIT]</span> 3-Node Raft cluster initialized in in-browser simulator.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Replicated Write-Ahead Log (WAL) -->
+  <div class="panel" style="margin-top: 1.25rem;">
+    <div class="panel-header">
+      <span>RAFT WRITE-AHEAD LOG (WAL LEDGER & CRC32 VERIFICATION)</span>
+      <span style="font-size: 0.75rem; color: var(--text-dim);" id="walCountBadge">0 entries</span>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Index</th>
+            <th>Term</th>
+            <th>Operation</th>
+            <th>Key / Value</th>
+            <th>CRC32 Checksum</th>
+            <th>Commit Status</th>
+          </tr>
+        </thead>
+        <tbody id="walTableBody">
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">
+              WAL is currently empty. Writes will be replicated and checksummed here.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // --- Raft Simulation State ---
+    class RaftNode {
+      constructor(id, addr) {
+        this.id = id;
+        this.addr = addr;
+        this.online = true;
+        this.role = 'FOLLOWER'; // FOLLOWER, CANDIDATE, LEADER
+        this.term = 1;
+        this.votedFor = null;
+        this.commitIndex = -1;
+        this.lastApplied = -1;
+        this.electionTimeout = this.randomTimeout();
+        this.electionTimer = this.electionTimeout;
+        this.heartbeatTimer = 150;
+        this.kv = {};
+        this.log = [];
+      }
+
+      randomTimeout() {
+        return Math.floor(Math.random() * 2000) + 2000; // 2s - 4s
+      }
+    }
+
+    const cluster = [
+      new RaftNode('node1', '127.0.0.1:9001'),
+      new RaftNode('node2', '127.0.0.1:9002'),
+      new RaftNode('node3', '127.0.0.1:9003')
+    ];
+
+    // Node 1 starts as initial leader
+    cluster[0].role = 'LEADER';
+    cluster[0].term = 1;
+
+    let simSpeed = 1;
+    document.getElementById('simSpeed').addEventListener('change', (e) => {
+      simSpeed = parseFloat(e.target.value);
+    });
+
+    // Helper: Compute IEEE CRC32 Checksum (Standard Library Equivalent)
+    function makeCRC32(str) {
+      let crc = 0 ^ (-1);
+      for (let i = 0; i < str.length; i++) {
+        crc = (crc >>> 8) ^ crcTable[(crc ^ str.charCodeAt(i)) & 0xFF];
+      }
+      return ("00000000" + ((crc ^ (-1)) >>> 0).toString(16).toUpperCase()).slice(-8);
+    }
+
+    const crcTable = (() => {
+      let c, table = [];
+      for (let n = 0; n < 256; n++) {
+        c = n;
+        for (let k = 0; k < 8; k++) {
+          c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+        }
+        table[n] = c;
+      }
+      return table;
+    })();
+
+    function logMsg(type, text) {
+      const logs = document.getElementById('terminalLogs');
+      const time = new Date().toTimeString().split(' ')[0];
+      const div = document.createElement('div');
+      div.className = 'log-item';
+      let tagClass = 'log-info';
+      if (type === 'OK') tagClass = 'log-ok';
+      if (type === 'WARN') tagClass = 'log-warn';
+      if (type === 'CHAOS') tagClass = 'log-chaos';
+
+      div.innerHTML = `<span class="log-time">[${time}]</span> <span class="${tagClass}">[${type}]</span> ${text}`;
+      logs.appendChild(div);
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    // --- Simulation Loop ---
+    let lastTick = performance.now();
+    function tick(now) {
+      const delta = (now - lastTick) * simSpeed;
+      lastTick = now;
+
+      const onlineNodes = cluster.filter(n => n.online);
+      const majority = Math.floor(cluster.length / 2) + 1;
+      let hasLeader = false;
+
+      cluster.forEach(node => {
+        if (!node.online) return;
+
+        if (node.role === 'LEADER') {
+          hasLeader = true;
+          node.heartbeatTimer -= delta;
+          if (node.heartbeatTimer <= 0) {
+            node.heartbeatTimer = 300;
+            // Send heartbeats to followers
+            onlineNodes.forEach(peer => {
+              if (peer.id !== node.id && peer.online) {
+                peer.electionTimer = peer.randomTimeout();
+                peer.term = node.term;
+                peer.role = 'FOLLOWER';
+              }
+            });
+          }
+        } else {
+          // Follower / Candidate election timer countdown
+          node.electionTimer -= delta;
+          if (node.electionTimer <= 0) {
+            startElection(node);
+          }
+        }
+      });
+
+      renderUI();
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    function startElection(node) {
+      node.role = 'CANDIDATE';
+      node.term += 1;
+      node.votedFor = node.id;
+      node.electionTimeout = node.randomTimeout();
+      node.electionTimer = node.electionTimeout;
+
+      logMsg('WARN', `Node ${node.id} election timer expired. Starting election for Term ${node.term}`);
+
+      const onlineNodes = cluster.filter(n => n.online);
+      const majority = Math.floor(cluster.length / 2) + 1;
+      let votes = 1; // votes for self
+
+      onlineNodes.forEach(peer => {
+        if (peer.id !== node.id && peer.online) {
+          if (peer.term < node.term) {
+            peer.term = node.term;
+            peer.role = 'FOLLOWER';
+            peer.votedFor = node.id;
+            votes++;
+          }
+        }
+      });
+
+      if (votes >= majority && node.online) {
+        node.role = 'LEADER';
+        logMsg('OK', `🏆 Node ${node.id} won quorum (${votes}/${cluster.length} votes) -> Elected LEADER for Term ${node.term}`);
+      }
+    }
+
+    // --- Actions ---
+    function proposeWrite(op, key, val) {
+      const leader = cluster.find(n => n.online && n.role === 'LEADER');
+      if (!leader) {
+        logMsg('CHAOS', `[FAILED] No active leader. Proposal rejected (Cluster has no quorum).`);
+        return false;
+      }
+
+      const entryIndex = leader.log.length;
+      const crc = makeCRC32(`${op}:${key}:${val}:${entryIndex}:${leader.term}`);
+      const entry = { index: entryIndex, term: leader.term, op, key, val, crc };
+
+      leader.log.push(entry);
+
+      // Replicate to followers
+      let acks = 1;
+      cluster.forEach(peer => {
+        if (peer.online && peer.id !== leader.id) {
+          peer.log.push(entry);
+          acks++;
+        }
+      });
+
+      const majority = Math.floor(cluster.length / 2) + 1;
+      if (acks >= majority) {
+        leader.commitIndex = entryIndex;
+        leader.lastApplied = entryIndex;
+
+        cluster.forEach(peer => {
+          if (peer.online) {
+            peer.commitIndex = entryIndex;
+            peer.lastApplied = entryIndex;
+            if (op === 'SET') {
+              peer.kv[key] = val;
+            } else if (op === 'DEL') {
+              delete peer.kv[key];
+            }
+          }
+        });
+
+        logMsg('OK', `[COMMITTED] ${op} '${key}'${val ? " = '" + val + "'" : ""} replicated to ${acks}/${cluster.length} nodes (CRC32: 0x${crc}) via ${leader.addr}`);
+        return true;
+      }
+      return false;
+    }
+
+    function killNode(id) {
+      const node = cluster.find(n => n.id === id);
+      if (!node) return;
+      node.online = false;
+      const wasLeader = node.role === 'LEADER';
+      node.role = 'FOLLOWER';
+      logMsg('CHAOS', `[CHAOS] Killed ${node.id} (${wasLeader ? 'WAS ACTIVE LEADER' : 'Follower'})`);
+    }
+
+    function spawnNode(id) {
+      const node = cluster.find(n => n.id === id);
+      if (!node) return;
+      node.online = true;
+      node.electionTimer = node.randomTimeout();
+      
+      // Catch up with leader
+      const leader = cluster.find(n => n.online && n.role === 'LEADER');
+      if (leader) {
+        node.term = leader.term;
+        node.log = [...leader.log];
+        node.kv = { ...leader.kv };
+        node.commitIndex = leader.commitIndex;
+        node.lastApplied = leader.lastApplied;
+      }
+      logMsg('OK', `[RECOVERY] Replayed WAL & Spawned ${node.id} (Rejoined quorum as FOLLOWER)`);
+    }
+
+    function executeAction(cmd) {
+      document.getElementById('cliInput').value = cmd;
+      handleCommand();
+    }
+
+    function handleCommand() {
+      const input = document.getElementById('cliInput');
+      const line = input.value.trim();
+      if (!line) return;
+      input.value = '';
+
+      const parts = line.split(' ');
+      const cmd = parts[0].toLowerCase();
+
+      if (cmd === 'set' && parts.length >= 3) {
+        proposeWrite('SET', parts[1], parts.slice(2).join(' '));
+      } else if ((cmd === 'del' || cmd === 'delete') && parts.length >= 2) {
+        proposeWrite('DEL', parts[1], '');
+      } else if (cmd === 'get' && parts.length >= 2) {
+        const key = parts[1];
+        const online = cluster.find(n => n.online);
+        if (online && online.kv[key]) {
+          logMsg('OK', `[FOUND] Key '${key}' = '${online.kv[key]}' (read from ${online.id})`);
+        } else {
+          logMsg('WARN', `[NOT FOUND] Key '${key}' does not exist.`);
+        }
+      } else if (cmd === 'kill') {
+        const target = (parts[1] || '').toLowerCase();
+        if (target === 'leader') {
+          const leader = cluster.find(n => n.online && n.role === 'LEADER');
+          if (leader) killNode(leader.id);
+        } else {
+          killNode(target.startsWith('node') ? target : 'node' + target);
+        }
+      } else if (cmd === 'spawn' || cmd === 'revive') {
+        const target = (parts[1] || '').toLowerCase();
+        if (target === 'all') {
+          cluster.forEach(n => spawnNode(n.id));
+        } else {
+          spawnNode(target.startsWith('node') ? target : 'node' + target);
+        }
+      } else if (cmd === 'bench') {
+        let count = parseInt(parts[1]) || 10;
+        logMsg('INFO', `Running concurrent benchmark: ${count} writes...`);
+        let done = 0;
+        for (let i = 0; i < count; i++) {
+          setTimeout(() => {
+            if (proposeWrite('SET', `bench_${i}`, `val_${Math.random().toString(36).substring(7)}`)) {
+              done++;
+            }
+          }, i * 50);
+        }
+      } else {
+        logMsg('WARN', `Unknown command '${line}'. Try: set <k> <v>, get <k>, del <k>, kill leader, spawn node1, bench`);
+      }
+    }
+
+    // --- Render Loop ---
+    function renderUI() {
+      const container = document.getElementById('nodesContainer');
+      container.innerHTML = '';
+
+      cluster.forEach(node => {
+        const card = document.createElement('div');
+        let roleClass = node.role.toLowerCase();
+        if (!node.online) roleClass = 'offline';
+        card.className = `node-card ${roleClass}`;
+
+        const pct = Math.max(0, Math.min(100, (node.electionTimer / node.electionTimeout) * 100));
+
+        card.innerHTML = `
+          <div class="node-header">
+            <div class="node-title">
+              <span class="status-dot"></span>
+              <span>${node.id.toUpperCase()}</span>
+            </div>
+            <span class="badge ${node.online ? (node.role === 'LEADER' ? 'badge-green' : 'badge-cyan') : 'badge-red'}">
+              ${node.online ? node.role : 'OFFLINE'}
+            </span>
+          </div>
+          <div class="node-body">
+            <div class="metric-row">
+              <span class="metric-label">Address</span>
+              <span class="metric-val" style="color: var(--cyan);">${node.addr}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-label">Raft Term</span>
+              <span class="metric-val">${node.term}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-label">Commit / Applied</span>
+              <span class="metric-val">#${node.commitIndex} / #${node.lastApplied}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-label">WAL Entries</span>
+              <span class="metric-val">${node.log.length}</span>
+            </div>
+            ${node.online && node.role !== 'LEADER' ? `
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-dim);">
+                  <span>Election Timeout</span>
+                  <span>${Math.round(node.electionTimer)}ms</span>
+                </div>
+                <div class="timer-bar-container">
+                  <div class="timer-bar" style="width: ${pct}%;"></div>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+          <div class="node-actions">
+            ${node.online ? `
+              <button class="btn-danger" style="flex:1" onclick="killNode('${node.id}')">Crash Node</button>
+            ` : `
+              <button class="btn-success" style="flex:1" onclick="spawnNode('${node.id}')">Revive Node</button>
+            `}
+          </div>
+        `;
+        container.appendChild(card);
+      });
+
+      // Render KV Table
+      const allKeys = new Set();
+      cluster.forEach(n => {
+        if (n.online) {
+          Object.keys(n.kv).forEach(k => allKeys.add(k));
+        }
+      });
+
+      const kvBody = document.getElementById('kvTableBody');
+      if (allKeys.size === 0) {
+        kvBody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">No keys stored yet. Type 'SET user Alice' above.</td></tr>`;
+      } else {
+        kvBody.innerHTML = '';
+        Array.from(allKeys).sort().forEach(k => {
+          const tr = document.createElement('tr');
+          let cols = `<td><strong>${k}</strong></td>`;
+          cluster.forEach(n => {
+            if (!n.online) {
+              cols += `<td class="val-offline">[OFFLINE]</td>`;
+            } else if (n.kv[k] !== undefined) {
+              cols += `<td class="val-active">${n.kv[k]}</td>`;
+            } else {
+              cols += `<td class="val-nil">&lt;nil&gt;</td>`;
+            }
+          });
+          tr.innerHTML = cols;
+          kvBody.appendChild(tr);
+        });
+      }
+      document.getElementById('keyCountBadge').innerText = `${allKeys.size} key${allKeys.size === 1 ? '' : 's'}`;
+
+      // Render WAL Table (from leader or first online node)
+      const refNode = cluster.find(n => n.online && n.role === 'LEADER') || cluster.find(n => n.online) || cluster[0];
+      const walBody = document.getElementById('walTableBody');
+      if (refNode.log.length === 0) {
+        walBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">WAL is currently empty. Writes will be replicated and checksummed here.</td></tr>`;
+      } else {
+        walBody.innerHTML = '';
+        refNode.log.slice(-8).reverse().forEach(entry => {
+          const tr = document.createElement('tr');
+          const isCommitted = entry.index <= refNode.commitIndex;
+          tr.innerHTML = `
+            <td>#${entry.index}</td>
+            <td>Term ${entry.term}</td>
+            <td style="color: ${entry.op === 'DEL' ? 'var(--red)' : 'var(--green)'}; font-weight:600;">${entry.op}</td>
+            <td>${entry.key} ${entry.val ? '= ' + entry.val : ''}</td>
+            <td style="color: var(--cyan); font-family: monospace;">0x${entry.crc}</td>
+            <td><span class="badge ${isCommitted ? 'badge-green' : 'badge-cyan'}">${isCommitted ? 'COMMITTED' : 'UNCOMMITTED'}</span></td>
+          `;
+          walBody.appendChild(tr);
+        });
+      }
+      document.getElementById('walCountBadge').innerText = `${refNode.log.length} entries`;
+    }
+  </script>
+</body>
+</html>
