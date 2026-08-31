@@ -1,12 +1,11 @@
 # Orris
 
-> **A production-grade distributed key-value store built entirely from Go's standard library — no third-party dependencies.**
+> **A fault-tolerant distributed key-value store with Raft consensus and durable Write-Ahead Logging — built entirely from Go's standard library with zero third-party dependencies.**
 
-```
-go run ./cmd/orrisctl
-```
+🌐 **Live Interactive Web Simulation (Click & Play):** [https://orrisraft.vercel.app](https://orrisraft.vercel.app/)  
+⚡ **Instant Local Launch:** `go run ./cmd/orrisctl`
 
-*That single command boots a 3-node Raft cluster, elects a leader, and drops you into a live interactive visualizer. No Docker. No config files. No external packages.*
+*Boot a 3-node Raft cluster, elect a leader, and explore consensus with live visual dashboards — online in your browser or locally in your terminal.*
 
 ---
 
@@ -241,9 +240,11 @@ go run ./cmd/orrisctl stop
 
 ## Interactive Visual Console
 
-Run `go run ./cmd/orrisctl` to enter the live dashboard:
+You can run the live dashboard in two ways:
+1. **In your browser (zero setup):** Open [https://orrisraft.vercel.app](https://orrisraft.vercel.app/) to click and play immediately.
+2. **In your terminal:** Run `go run ./cmd/orrisctl` to interact with real background Go processes.
 
-```
+```text
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
 ║  ORRIS CLUSTER VISUALIZER  [Zero-Dependency Raft Consensus]          TIME: 18:04:15  ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
