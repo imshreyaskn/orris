@@ -3,863 +3,1026 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orris — Interactive Raft Consensus & KV Visualizer</title>
+  <title>orris — distributed kv playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     :root {
-      --bg-main: #0a0d14;
-      --bg-card: #121824;
-      --bg-card-header: #182234;
-      --border-color: #1e2d42;
-      --text-main: #e2e8f0;
-      --text-dim: #64748b;
-      --cyan: #06b6d4;
-      --green: #10b981;
-      --yellow: #f59e0b;
-      --red: #ef4444;
-      --blue: #3b82f6;
-      --purple: #a855f7;
-      --mono-font: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --bg:       #0e0e0e;
+      --surface:  #141414;
+      --raised:   #1a1a1a;
+      --border:   #242424;
+      --border-faint: #1c1c1c;
+
+      --text:     #d4d4d4;
+      --dim:      #525252;
+      --dimmer:   #2e2e2e;
+
+      --cyan:     #22d3ee;
+      --green:    #4ade80;
+      --yellow:   #fbbf24;
+      --red:      #f87171;
+      --blue:     #93c5fd;
+
+      --green-bg: rgba(74,222,128,0.06);
+      --red-bg:   rgba(248,113,113,0.07);
+      --yellow-bg:rgba(251,191,36,0.07);
+      --cyan-bg:  rgba(34,211,238,0.06);
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-main);
-      color: var(--text-main);
-      font-family: var(--mono-font);
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
       min-height: 100vh;
+    }
+
+    ::selection { background: rgba(34,211,238,0.2); }
+
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ── Shell ───────────────────────────────────── */
+    .shell {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 0 28px 80px;
+    }
+
+    /* ── Header bar ──────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+
+    .header-left {
       display: flex;
       flex-direction: column;
-      padding: 1.5rem;
+      gap: 2px;
     }
 
-    header {
-      border: 1px solid var(--cyan);
-      background: linear-gradient(180deg, rgba(6, 182, 212, 0.1) 0%, rgba(10, 13, 20, 0.8) 100%);
-      padding: 1rem 1.5rem;
-      border-radius: 8px;
-      margin-bottom: 1.5rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
-    }
-
-    .title-area h1 {
-      font-size: 1.25rem;
+    .header-title {
+      font-size: 13px;
+      font-weight: 500;
       color: var(--cyan);
-      font-weight: 700;
       letter-spacing: 0.5px;
     }
 
-    .title-area p {
-      font-size: 0.8rem;
-      color: var(--text-dim);
-      margin-top: 0.2rem;
+    .header-sub {
+      font-size: 11px;
+      color: var(--dim);
+      font-weight: 300;
     }
 
-    .header-badges {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-    }
-
-    .badge {
-      font-size: 0.75rem;
-      padding: 0.35rem 0.65rem;
-      border-radius: 4px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .badge-cyan { background: rgba(6, 182, 212, 0.2); color: var(--cyan); border: 1px solid var(--cyan); }
-    .badge-green { background: rgba(16, 185, 129, 0.2); color: var(--green); border: 1px solid var(--green); }
-
-    /* Main Grid Layout */
-    .grid-container {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.25rem;
-      margin-bottom: 1.5rem;
-    }
-
-    @media (max-width: 1024px) {
-      .grid-container { grid-template-columns: 1fr; }
-    }
-
-    /* Node Cards */
-    .node-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      transition: all 0.2s ease;
-      position: relative;
-    }
-
-    .node-card.leader {
-      border-color: var(--green);
-      box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
-    }
-
-    .node-card.candidate {
-      border-color: var(--yellow);
-      box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
-    }
-
-    .node-card.offline {
-      border-color: var(--red);
-      opacity: 0.6;
-    }
-
-    .node-header {
-      background: var(--bg-card-header);
-      padding: 0.75rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .node-title {
-      font-weight: 700;
+    .header-right {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 24px;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
+    .cluster-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--dim);
+    }
+
+    .blink {
+      width: 6px; height: 6px;
       border-radius: 50%;
       background: var(--green);
-      display: inline-block;
+      flex-shrink: 0;
+    }
+    .blink.red    { background: var(--red); }
+    .blink.yellow { background: var(--yellow); animation: blink 0.9s infinite; }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    .speed-sel {
+      font-family: inherit;
+      font-size: 11px;
+      color: var(--dim);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 4px 8px;
+      outline: none;
+      cursor: pointer;
+    }
+    .speed-sel option { background: var(--surface); }
+
+    /* ── Section headers (terminal-style) ────────── */
+    .sec {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--dim);
+      letter-spacing: 0.4px;
+      margin-bottom: 14px;
+      white-space: nowrap;
+    }
+    .sec::before { content: '--- [ '; }
+    .sec::after  { content: ' ] '; }
+    .sec-line {
+      flex: 1;
+      height: 1px;
+      background: var(--border-faint);
+      margin-left: 4px;
     }
 
-    .node-card.offline .status-dot { background: var(--red); }
-    .node-card.candidate .status-dot { background: var(--yellow); }
+    /* ── Node Grid ───────────────────────────────── */
+    .node-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 900px) { .node-grid { grid-template-columns: 1fr; } }
+
+    .node-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .node-card.leader  { border-color: rgba(74,222,128,0.35); }
+    .node-card.offline { opacity: 0.4; }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-faint);
+      background: var(--raised);
+    }
+
+    .node-id {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 500;
+      font-size: 12px;
+    }
+
+    .role-badge {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 2px;
+      letter-spacing: 0.3px;
+    }
+    .r-leader    { background: var(--green-bg); color: var(--green); }
+    .r-follower  { color: var(--dim); border: 1px solid var(--border); }
+    .r-candidate { background: var(--yellow-bg); color: var(--yellow); }
+    .r-offline   { background: var(--red-bg); color: var(--red); }
 
     .node-body {
-      padding: 1rem;
-      font-size: 0.85rem;
+      padding: 12px 14px;
       display: flex;
       flex-direction: column;
-      gap: 0.6rem;
-      flex: 1;
+      gap: 8px;
     }
 
-    .metric-row {
+    .node-row {
       display: flex;
       justify-content: space-between;
-      padding-bottom: 0.3rem;
-      border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+      align-items: baseline;
+      font-size: 12px;
     }
+    .node-row .k { color: var(--dim); }
+    .node-row .v { color: var(--text); }
+    .node-row .v.cyan  { color: var(--cyan); }
+    .node-row .v.green { color: var(--green); }
 
-    .metric-label { color: var(--text-dim); }
-    .metric-val { font-weight: 600; }
-
-    .timer-bar-container {
-      width: 100%;
-      height: 4px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 2px;
+    .et-block {
+      padding: 0 14px 12px;
+    }
+    .et-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--dim);
+      margin-bottom: 5px;
+    }
+    .et-track {
+      height: 2px;
+      background: var(--border);
+      border-radius: 1px;
       overflow: hidden;
-      margin-top: 0.3rem;
     }
-
-    .timer-bar {
+    .et-fill {
       height: 100%;
-      background: var(--cyan);
-      width: 100%;
-      transition: width 0.1s linear;
+      background: var(--dim);
+      border-radius: 1px;
+      transition: width 0.08s linear;
     }
 
-    .node-actions {
-      padding: 0.75rem 1rem;
-      background: rgba(0, 0, 0, 0.2);
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      gap: 0.5rem;
+    .node-foot {
+      border-top: 1px solid var(--border-faint);
+      padding: 8px 14px;
     }
 
-    button {
+    .node-action {
       font-family: inherit;
-      font-size: 0.75rem;
-      padding: 0.4rem 0.8rem;
-      border-radius: 4px;
-      border: 1px solid var(--border-color);
-      background: var(--bg-card-header);
-      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 400;
+      padding: 5px 10px;
+      border-radius: 2px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
       cursor: pointer;
-      font-weight: 600;
-      transition: all 0.15s ease;
+      width: 100%;
+      transition: all 0.12s;
+      letter-spacing: 0.2px;
     }
+    .node-action:hover           { color: var(--text); border-color: var(--dimmer); background: var(--raised); }
+    .node-action.crash           { color: var(--red);   border-color: rgba(248,113,113,0.2); }
+    .node-action.crash:hover     { background: var(--red-bg); border-color: rgba(248,113,113,0.4); }
+    .node-action.revive          { color: var(--green); border-color: rgba(74,222,128,0.2); }
+    .node-action.revive:hover    { background: var(--green-bg); border-color: rgba(74,222,128,0.4); }
 
-    button:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: var(--text-main);
-    }
-
-    button.btn-danger {
-      border-color: rgba(239, 68, 68, 0.5);
-      color: var(--red);
-    }
-    button.btn-danger:hover {
-      background: rgba(239, 68, 68, 0.2);
-      border-color: var(--red);
-    }
-
-    button.btn-success {
-      border-color: rgba(16, 185, 129, 0.5);
-      color: var(--green);
-    }
-    button.btn-success:hover {
-      background: rgba(16, 185, 129, 0.2);
-      border-color: var(--green);
-    }
-
-    button.btn-primary {
-      background: var(--cyan);
-      color: #000;
-      border: none;
-    }
-    button.btn-primary:hover {
-      background: #22d3ee;
-    }
-
-    /* Lower Section: Controls + Logs + KV Matrix */
-    .dashboard-lower {
+    /* ── Main two-col layout ─────────────────────── */
+    .main-cols {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.25rem;
+      grid-template-columns: 1fr 360px;
+      gap: 12px;
+      margin-bottom: 28px;
+      align-items: start;
     }
+    @media (max-width: 1100px) { .main-cols { grid-template-columns: 1fr; } }
 
-    @media (max-width: 1024px) {
-      .dashboard-lower { grid-template-columns: 1fr; }
-    }
-
+    /* ── Panel base ──────────────────────────────── */
     .panel {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
       overflow: hidden;
-      display: flex;
-      flex-direction: column;
     }
 
-    .panel-header {
-      background: var(--bg-card-header);
-      padding: 0.75rem 1rem;
-      font-size: 0.85rem;
-      font-weight: 700;
+    .panel-head {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--border-color);
+      justify-content: space-between;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border-faint);
+      background: var(--raised);
+      font-size: 11px;
     }
+    .ph-label { color: var(--dim); letter-spacing: 0.3px; }
+    .ph-meta  { color: var(--dimmer); font-size: 11px; }
 
-    .panel-body {
-      padding: 1rem;
-      flex: 1;
+    /* ── KV Table ────────────────────────────────── */
+    .kv-wrap {
       overflow-x: auto;
+      padding: 14px;
     }
 
-    /* CLI Controls */
-    .cli-bar {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .cli-input {
-      flex: 1;
-      background: var(--bg-main);
-      border: 1px solid var(--border-color);
-      border-radius: 4px;
-      color: var(--cyan);
-      padding: 0.5rem 0.75rem;
-      font-family: inherit;
-      font-size: 0.85rem;
-      outline: none;
-    }
-
-    .cli-input:focus {
-      border-color: var(--cyan);
-    }
-
-    .quick-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-
-    /* Tables */
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.8rem;
-      text-align: left;
-    }
-
-    th, td {
-      padding: 0.5rem 0.6rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 12px;
     }
 
     th {
-      color: var(--text-dim);
-      font-weight: 600;
-      text-transform: uppercase;
-      font-size: 0.7rem;
+      font-weight: 400;
+      font-size: 11px;
+      color: var(--dim);
+      text-align: left;
+      padding: 0 8px 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    th:first-child { padding-left: 0; }
+
+    td {
+      padding: 8px 8px 8px 0;
+      border-bottom: 1px solid var(--border-faint);
+      vertical-align: middle;
+      font-size: 12px;
+    }
+    td:first-child { padding-left: 0; }
+    tr:last-child td { border-bottom: none; }
+
+    .td-key      { color: var(--text); }
+    .td-val-ok   { color: var(--green); }
+    .td-nil      { color: var(--dimmer); }
+    .td-offline  { color: var(--red); font-size: 11px; }
+
+    .empty-row td {
+      text-align: center;
+      color: var(--dimmer);
+      padding: 28px 0;
+      font-size: 11px;
+      border-bottom: none;
     }
 
-    .val-active { color: var(--green); font-weight: 600; }
-    .val-nil { color: var(--text-dim); }
-    .val-offline { color: var(--red); font-weight: 600; }
-
-    /* Event Log Terminal */
-    .terminal-logs {
-      background: var(--bg-main);
-      padding: 0.75rem;
-      border-radius: 6px;
-      height: 160px;
-      overflow-y: auto;
-      font-size: 0.75rem;
-      line-height: 1.4;
-      border: 1px solid rgba(255, 255, 255, 0.05);
+    /* ── CLI Panel ───────────────────────────────── */
+    .cli-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
-    .log-item { margin-bottom: 0.2rem; }
-    .log-time { color: var(--text-dim); margin-right: 0.5rem; }
-    .log-ok { color: var(--green); }
-    .log-warn { color: var(--yellow); }
-    .log-chaos { color: var(--red); font-weight: 700; }
-    .log-info { color: var(--cyan); }
-
-    .speed-control {
+    .cmd-row {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      font-size: 0.75rem;
-      color: var(--text-dim);
+      border-bottom: 1px solid var(--border-faint);
     }
+    .cmd-prompt {
+      font-size: 12px;
+      color: var(--green);
+      padding: 10px 0 10px 14px;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .cmd-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: inherit;
+      font-size: 12px;
+      color: var(--text);
+      padding: 10px 8px;
+      caret-color: var(--green);
+    }
+    .cmd-input::placeholder { color: var(--dimmer); }
+    .cmd-run {
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 0 14px;
+      height: 100%;
+      border: none;
+      border-left: 1px solid var(--border-faint);
+      background: var(--green-bg);
+      color: var(--green);
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: background 0.12s;
+    }
+    .cmd-run:hover { background: rgba(74,222,128,0.14); }
+
+    .quick-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-faint);
+    }
+
+    .qb {
+      font-family: inherit;
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 2px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.1s;
+    }
+    .qb:hover          { color: var(--text); border-color: var(--dimmer); }
+    .qb.red            { color: var(--red); border-color: rgba(248,113,113,0.2); }
+    .qb.red:hover      { background: var(--red-bg); border-color: rgba(248,113,113,0.4); }
+    .qb.green          { color: var(--green); border-color: rgba(74,222,128,0.2); }
+    .qb.green:hover    { background: var(--green-bg); border-color: rgba(74,222,128,0.4); }
+
+    .event-log {
+      height: 190px;
+      overflow-y: auto;
+      padding: 10px 14px;
+      font-size: 11px;
+      line-height: 1.7;
+    }
+
+    .ev { display: flex; gap: 8px; }
+    .ev-t    { color: var(--dimmer); flex-shrink: 0; }
+    .ev-tag  { flex-shrink: 0; }
+    .ev-ok   { color: var(--green); }
+    .ev-warn { color: var(--yellow); }
+    .ev-err  { color: var(--red); }
+    .ev-info { color: var(--cyan); }
+    .ev-msg  { color: var(--dim); word-break: break-word; }
+
+    /* ── WAL Table ───────────────────────────────── */
+    .wal-panel { margin-top: 0; }
+
+    .commit-tag {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 2px;
+      letter-spacing: 0.3px;
+    }
+    .ct-committed { background: var(--green-bg); color: var(--green); }
+    .ct-pending   { color: var(--dimmer); }
+
+    .wal-op-set { color: var(--green); }
+    .wal-op-del { color: var(--red); }
+    .wal-crc    { color: var(--dimmer); font-size: 11px; }
   </style>
 </head>
 <body>
+<div class="shell">
 
   <!-- Header -->
-  <header>
-    <div class="title-area">
-      <h1>ORRIS CLUSTER PLAYGROUND</h1>
-      <p>Interactive Raft Consensus, Distributed KV Replication & WAL Simulator</p>
+  <div class="header">
+    <div class="header-left">
+      <div class="header-title">ORRIS CLUSTER VISUALIZER&nbsp; [Zero-Dependency Raft Consensus]</div>
+      <div class="header-sub">simulated in-browser &nbsp;·&nbsp; matching orrisctl wire protocol</div>
     </div>
-    <div class="header-badges">
-      <div class="speed-control">
-        <span>Speed:</span>
-        <select id="simSpeed" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: inherit;">
-          <option value="1">1x (Real-time)</option>
-          <option value="0.5">0.5x (Slow-mo)</option>
-          <option value="2">2x (Fast)</option>
-        </select>
+    <div class="header-right">
+      <div class="cluster-status">
+        <span class="blink" id="clusterDot"></span>
+        <span id="clusterLabel">3 nodes online</span>
       </div>
-      <span class="badge badge-cyan">Zero Dependencies</span>
-      <span class="badge badge-green" id="clusterStatusBadge">Cluster Healthy</span>
+      <select class="speed-sel" id="speedSel">
+        <option value="1">1× realtime</option>
+        <option value="0.35">0.35× slow-mo</option>
+        <option value="3">3× fast</option>
+      </select>
     </div>
-  </header>
-
-  <!-- Node Grid -->
-  <div class="grid-container" id="nodesContainer">
-    <!-- Generated by JS -->
   </div>
 
-  <!-- Lower Dashboard -->
-  <div class="dashboard-lower">
+  <!-- CLUSTER NODES -->
+  <div class="sec">CLUSTER NODES &amp; RAFT STATE<span class="sec-line"></span></div>
+  <div class="node-grid" id="nodeGrid"></div>
 
-    <!-- Replicated State Machine (KV Store) -->
-    <div class="panel">
-      <div class="panel-header">
-        <span>REPLICATED STATE MACHINE (KV STORE)</span>
-        <span style="font-size: 0.75rem; color: var(--text-dim);" id="keyCountBadge">0 keys</span>
-      </div>
-      <div class="panel-body">
-        <table id="kvTable">
-          <thead>
-            <tr>
-              <th>Key</th>
-              <th>Node 1</th>
-              <th>Node 2</th>
-              <th>Node 3</th>
-            </tr>
-          </thead>
-          <tbody id="kvTableBody">
-            <tr>
-              <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 2rem;">
-                No keys stored yet. Propose a write below (e.g. SET user Alice).
-              </td>
-            </tr>
-          </tbody>
-        </table>
+  <!-- KV + CLI -->
+  <div class="main-cols">
+
+    <!-- Replicated KV State -->
+    <div>
+      <div class="sec">REPLICATED STATE MACHINE (KV STORE)<span class="sec-line"></span></div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ph-label">key / value matrix</span>
+          <span class="ph-meta" id="kvMeta">0 keys</span>
+        </div>
+        <div class="kv-wrap">
+          <table>
+            <thead>
+              <tr id="kvThead">
+                <th style="width:140px">key</th>
+                <th>node1</th><th>node2</th><th>node3</th>
+              </tr>
+            </thead>
+            <tbody id="kvTbody">
+              <tr class="empty-row"><td colspan="4">no keys stored yet — SET something above</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <!-- Cluster Controls & Interactive CLI -->
-    <div class="panel">
-      <div class="panel-header">
-        <span>INTERACTIVE REPL & CHAOS ENGINEERING</span>
-      </div>
-      <div class="panel-body">
-        <form class="cli-bar" id="cliForm" onsubmit="event.preventDefault(); handleCommand();">
-          <input type="text" class="cli-input" id="cliInput" placeholder="Enter command: set <k> <v> | get <k> | del <k> | kill leader | bench" autofocus>
-          <button type="submit" class="btn-primary">Execute</button>
+    <!-- CLI -->
+    <div>
+      <div class="sec">REPL &amp; CHAOS ENGINEERING<span class="sec-line"></span></div>
+      <div class="cli-panel">
+        <div class="panel-head">
+          <span class="ph-label">orris&gt;</span>
+          <span class="ph-meta" id="timeClock"></span>
+        </div>
+        <form id="cliForm" onsubmit="event.preventDefault(); run();">
+          <div class="cmd-row">
+            <span class="cmd-prompt">$</span>
+            <input class="cmd-input" id="cmdIn" placeholder="set user alice" autocomplete="off" spellcheck="false">
+            <button class="cmd-run" type="submit">EXEC</button>
+          </div>
         </form>
-
-        <div class="quick-actions">
-          <button onclick="executeAction('SET user Alice')">SET user Alice</button>
-          <button onclick="executeAction('SET project Orris')">SET project Orris</button>
-          <button onclick="executeAction('GET user')">GET user</button>
-          <button onclick="executeAction('DEL user')">DEL user</button>
-          <button class="btn-danger" onclick="executeAction('kill leader')">⚡ Kill Leader</button>
-          <button class="btn-success" onclick="executeAction('spawn all')">🟢 Revive All</button>
-          <button onclick="executeAction('bench 20 4')">🚀 Benchmark (20 writes)</button>
+        <div class="quick-row">
+          <button class="qb"       onclick="qa('set user alice')">set user alice</button>
+          <button class="qb"       onclick="qa('set role admin')">set role admin</button>
+          <button class="qb"       onclick="qa('set project orris')">set project orris</button>
+          <button class="qb"       onclick="qa('get user')">get user</button>
+          <button class="qb"       onclick="qa('del user')">del user</button>
+          <button class="qb red"   onclick="qa('kill leader')">kill leader</button>
+          <button class="qb red"   onclick="qa('kill node2')">kill node2</button>
+          <button class="qb green" onclick="qa('spawn all')">revive all</button>
+          <button class="qb"       onclick="qa('bench 20')">bench 20</button>
         </div>
-
-        <div class="terminal-logs" id="terminalLogs">
-          <div class="log-item"><span class="log-time">[00:00:00]</span> <span class="log-ok">[INIT]</span> 3-Node Raft cluster initialized in in-browser simulator.</div>
+        <div class="event-log" id="evLog">
+          <div class="ev">
+            <span class="ev-t">--:--:--</span>
+            <span class="ev-tag ev-info">[INIT]</span>
+            <span class="ev-msg">3-node Raft cluster initialized · node1 elected LEADER</span>
+          </div>
         </div>
       </div>
     </div>
 
   </div>
 
-  <!-- Replicated Write-Ahead Log (WAL) -->
-  <div class="panel" style="margin-top: 1.25rem;">
-    <div class="panel-header">
-      <span>RAFT WRITE-AHEAD LOG (WAL LEDGER & CRC32 VERIFICATION)</span>
-      <span style="font-size: 0.75rem; color: var(--text-dim);" id="walCountBadge">0 entries</span>
+  <!-- WAL -->
+  <div class="sec">RAFT WAL &amp; LOG ENTRIES<span class="sec-line"></span></div>
+  <div class="panel wal-panel">
+    <div class="panel-head">
+      <span class="ph-label">write-ahead log · CRC32 verified · replayed on crash recovery</span>
+      <span class="ph-meta" id="walMeta">0 entries</span>
     </div>
-    <div class="panel-body">
+    <div class="kv-wrap">
       <table>
         <thead>
           <tr>
-            <th>Index</th>
-            <th>Term</th>
-            <th>Operation</th>
-            <th>Key / Value</th>
-            <th>CRC32 Checksum</th>
-            <th>Commit Status</th>
+            <th>index</th>
+            <th>term</th>
+            <th>op</th>
+            <th>key / value</th>
+            <th>crc32 checksum</th>
+            <th>commit state</th>
           </tr>
         </thead>
-        <tbody id="walTableBody">
-          <tr>
-            <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">
-              WAL is currently empty. Writes will be replicated and checksummed here.
-            </td>
-          </tr>
+        <tbody id="walTbody">
+          <tr class="empty-row"><td colspan="6">log is empty</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <script>
-    // --- Raft Simulation State ---
-    class RaftNode {
-      constructor(id, addr) {
-        this.id = id;
-        this.addr = addr;
-        this.online = true;
-        this.role = 'FOLLOWER'; // FOLLOWER, CANDIDATE, LEADER
-        this.term = 1;
-        this.votedFor = null;
-        this.commitIndex = -1;
-        this.lastApplied = -1;
-        this.electionTimeout = this.randomTimeout();
-        this.electionTimer = this.electionTimeout;
-        this.heartbeatTimer = 150;
-        this.kv = {};
-        this.log = [];
-      }
+</div><!-- /shell -->
 
-      randomTimeout() {
-        return Math.floor(Math.random() * 2000) + 2000; // 2s - 4s
+<script>
+// ── CRC32 (IEEE 802.3 polynomial — matches Go hash/crc32.IEEETable) ─────────
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c;
+  }
+  return t;
+})();
+
+function crc32(str) {
+  let c = -1 >>> 0;
+  for (let i = 0; i < str.length; i++) c = CRC_TABLE[(c ^ str.charCodeAt(i)) & 0xFF] ^ (c >>> 8);
+  return (c ^ (-1 >>> 0)).toString(16).toUpperCase().padStart(8, '0');
+}
+
+// ── State model (mirrors orrisd internals) ───────────────────────────────────
+class Node {
+  constructor(i) {
+    this.id   = `node${i + 1}`;
+    this.port = 9001 + i;        // client port (9001, 9002, 9003)
+    this.cport= 8001 + i;        // consensus port
+    this.online      = true;
+    this.role        = 'FOLLOWER';
+    this.term        = 1;
+    this.commitIndex = -1;       // matches Go: starts at -1 before first commit
+    this.lastApplied = -1;
+    this.votedFor    = '';
+    this.log         = [];       // []LogEntry — same structure as storage.LogEntry
+    this.kv          = {};       // applied state machine
+    this.etMax       = this.randET();
+    this.et          = this.etMax;
+    this.hbTimer     = 300;
+    this.latency     = Math.random() * 2 + 0.5; // simulated ping ms
+  }
+  randET() { return 2200 + Math.random() * 2000; } // 2.2s – 4.2s
+}
+
+const nodes = [new Node(0), new Node(1), new Node(2)];
+nodes[0].role = 'LEADER';  // node1 starts as initial leader
+
+let speed = 1;
+document.getElementById('speedSel').onchange = e => speed = +e.target.value;
+
+// clock display
+function nowStr() { return new Date().toTimeString().slice(0, 8); }
+setInterval(() => { document.getElementById('timeClock').textContent = nowStr(); }, 1000);
+document.getElementById('timeClock').textContent = nowStr();
+
+// ── Raft election simulation ─────────────────────────────────────────────────
+let prev = performance.now();
+
+function tick(now) {
+  const dt = (now - prev) * speed;
+  prev = now;
+
+  nodes.forEach(n => {
+    if (!n.online) return;
+    if (n.role === 'LEADER') {
+      n.hbTimer -= dt;
+      if (n.hbTimer <= 0) {
+        n.hbTimer = 300;
+        // broadcast heartbeat to all online followers
+        nodes.forEach(p => {
+          if (p.online && p.id !== n.id) {
+            p.et = p.etMax;          // reset election timer
+            if (p.role !== 'LEADER') p.role = 'FOLLOWER';
+            p.term = Math.max(p.term, n.term);
+          }
+        });
       }
+    } else {
+      n.et -= dt;
+      if (n.et <= 0) startElection(n);
     }
+  });
 
-    const cluster = [
-      new RaftNode('node1', '127.0.0.1:9001'),
-      new RaftNode('node2', '127.0.0.1:9002'),
-      new RaftNode('node3', '127.0.0.1:9003')
-    ];
+  render();
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
 
-    // Node 1 starts as initial leader
-    cluster[0].role = 'LEADER';
-    cluster[0].term = 1;
+function startElection(candidate) {
+  candidate.role = 'CANDIDATE';
+  candidate.term += 1;
+  candidate.votedFor = candidate.id;
+  candidate.etMax = candidate.randET();
+  candidate.et    = candidate.etMax;
 
-    let simSpeed = 1;
-    document.getElementById('simSpeed').addEventListener('change', (e) => {
-      simSpeed = parseFloat(e.target.value);
+  const maj = Math.floor(nodes.length / 2) + 1;
+  let votes = 1; // votes for self
+
+  nodes.forEach(peer => {
+    if (!peer.online || peer.id === candidate.id) return;
+    // Vote if peer's term is lower (Raft §5.2)
+    if (peer.term < candidate.term) {
+      peer.term     = candidate.term;
+      peer.votedFor = candidate.id;
+      peer.role     = 'FOLLOWER';
+      votes++;
+    }
+  });
+
+  if (votes >= maj && candidate.online) {
+    candidate.role    = 'LEADER';
+    candidate.hbTimer = 300;
+    evLog('ok', `[ELECTION] ${candidate.id} won quorum (${votes}/${nodes.length} votes) → LEADER for Term ${candidate.term}`);
+  }
+}
+
+// ── Write proposal (mirrors handleClientReq / AppendEntries) ─────────────────
+function propose(op, key, val) {
+  const leader = nodes.find(n => n.online && n.role === 'LEADER');
+  if (!leader) {
+    evLog('err', '[FAILED] ERR NO_LEADER — write rejected, no quorum');
+    return false;
+  }
+
+  const index    = leader.log.length;
+  const checksum = crc32(`${op}:${key}:${val || ''}:${index}:${leader.term}`);
+  const entry    = { index, term: leader.term, op, key, val: val || '', checksum };
+
+  // AppendEntries: leader appends first then replicates
+  leader.log.push({ ...entry });
+  let acks = 1; // leader counts itself
+
+  nodes.forEach(peer => {
+    if (peer.online && peer.id !== leader.id) {
+      peer.log.push({ ...entry });
+      acks++;
+    }
+  });
+
+  const maj = Math.floor(nodes.length / 2) + 1;
+  if (acks >= maj) {
+    // Quorum reached → commit
+    nodes.forEach(n => {
+      if (n.online) {
+        n.commitIndex = index;
+        n.lastApplied = index;
+        if (op === 'SET')    n.kv[key] = val;
+        else if (op === 'DEL') delete n.kv[key];
+      }
     });
 
-    // Helper: Compute IEEE CRC32 Checksum (Standard Library Equivalent)
-    function makeCRC32(str) {
-      let crc = 0 ^ (-1);
-      for (let i = 0; i < str.length; i++) {
-        crc = (crc >>> 8) ^ crcTable[(crc ^ str.charCodeAt(i)) & 0xFF];
-      }
-      return ("00000000" + ((crc ^ (-1)) >>> 0).toString(16).toUpperCase()).slice(-8);
-    }
+    const display = val ? `'${key}' = '${val}'` : `'${key}'`;
+    const lat     = (leader.latency + Math.random() * 10).toFixed(2);
+    evLog('ok', `[COMMITTED] ${op} ${display} · replicated ${acks}/${nodes.length} · CRC32:${checksum} · via 127.0.0.1:${leader.port} in ${lat}ms`);
+    return true;
+  }
 
-    const crcTable = (() => {
-      let c, table = [];
-      for (let n = 0; n < 256; n++) {
-        c = n;
-        for (let k = 0; k < 8; k++) {
-          c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
-        }
-        table[n] = c;
-      }
-      return table;
-    })();
+  evLog('warn', `[WARN] only ${acks}/${nodes.length} acks — below quorum, not committed`);
+  return false;
+}
 
-    function logMsg(type, text) {
-      const logs = document.getElementById('terminalLogs');
-      const time = new Date().toTimeString().split(' ')[0];
-      const div = document.createElement('div');
-      div.className = 'log-item';
-      let tagClass = 'log-info';
-      if (type === 'OK') tagClass = 'log-ok';
-      if (type === 'WARN') tagClass = 'log-warn';
-      if (type === 'CHAOS') tagClass = 'log-chaos';
+// ── Node lifecycle (mirrors orrisctl clusterKill / clusterStartSingleNode) ───
+function crashNode(id) {
+  const n = nodes.find(x => x.id === id);
+  if (!n || !n.online) return;
+  const wasLeader = n.role === 'LEADER';
+  n.online   = false;
+  n.role     = 'FOLLOWER';
+  evLog('err', `[CHAOS] Killed ${n.id} (127.0.0.1:${n.port})${wasLeader ? ' · WAS ACTIVE LEADER' : ''}`);
+}
 
-      div.innerHTML = `<span class="log-time">[${time}]</span> <span class="${tagClass}">[${type}]</span> ${text}`;
-      logs.appendChild(div);
-      logs.scrollTop = logs.scrollHeight;
-    }
+function spawnNode(id) {
+  const n = nodes.find(x => x.id === id);
+  if (!n || n.online) return;
 
-    // --- Simulation Loop ---
-    let lastTick = performance.now();
-    function tick(now) {
-      const delta = (now - lastTick) * simSpeed;
-      lastTick = now;
+  // Rejoin: replay WAL from leader (mirrors node.go Start + WAL replay)
+  const leader = nodes.find(x => x.online && x.role === 'LEADER');
+  if (leader) {
+    n.term        = leader.term;
+    n.log         = leader.log.map(e => ({ ...e }));
+    n.kv          = { ...leader.kv };
+    n.commitIndex = leader.commitIndex;
+    n.lastApplied = leader.lastApplied;
+  }
 
-      const onlineNodes = cluster.filter(n => n.online);
-      const majority = Math.floor(cluster.length / 2) + 1;
-      let hasLeader = false;
+  n.online  = true;
+  n.role    = 'FOLLOWER';
+  n.et      = n.randET();
+  evLog('ok', `[RECOVERY] ${n.id} rejoined · WAL replayed · CommitIndex:${n.commitIndex} · Term:${n.term}`);
+}
 
-      cluster.forEach(node => {
-        if (!node.online) return;
+// ── CLI ───────────────────────────────────────────────────────────────────────
+function qa(cmd) {
+  document.getElementById('cmdIn').value = cmd;
+  run();
+}
 
-        if (node.role === 'LEADER') {
-          hasLeader = true;
-          node.heartbeatTimer -= delta;
-          if (node.heartbeatTimer <= 0) {
-            node.heartbeatTimer = 300;
-            // Send heartbeats to followers
-            onlineNodes.forEach(peer => {
-              if (peer.id !== node.id && peer.online) {
-                peer.electionTimer = peer.randomTimeout();
-                peer.term = node.term;
-                peer.role = 'FOLLOWER';
-              }
-            });
-          }
-        } else {
-          // Follower / Candidate election timer countdown
-          node.electionTimer -= delta;
-          if (node.electionTimer <= 0) {
-            startElection(node);
-          }
-        }
-      });
+function run() {
+  const raw = document.getElementById('cmdIn').value.trim();
+  if (!raw) return;
+  document.getElementById('cmdIn').value = '';
 
-      renderUI();
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
+  const parts = raw.split(/\s+/);
+  const cmd   = parts[0].toUpperCase();
 
-    function startElection(node) {
-      node.role = 'CANDIDATE';
-      node.term += 1;
-      node.votedFor = node.id;
-      node.electionTimeout = node.randomTimeout();
-      node.electionTimer = node.electionTimeout;
+  switch (cmd) {
+    case 'SET':
+      if (parts.length < 3) { evLog('warn', '[ERR] Usage: set <key> <value>'); break; }
+      propose('SET', parts[1], parts.slice(2).join(' '));
+      break;
 
-      logMsg('WARN', `Node ${node.id} election timer expired. Starting election for Term ${node.term}`);
+    case 'DEL': case 'DELETE':
+      if (!parts[1]) { evLog('warn', '[ERR] Usage: del <key>'); break; }
+      propose('DEL', parts[1]);
+      break;
 
-      const onlineNodes = cluster.filter(n => n.online);
-      const majority = Math.floor(cluster.length / 2) + 1;
-      let votes = 1; // votes for self
+    case 'GET':
+      if (!parts[1]) { evLog('warn', '[ERR] Usage: get <key>'); break; }
+      const src = nodes.find(n => n.online && n.kv[parts[1]] !== undefined);
+      if (src) evLog('ok', `[FOUND] '${parts[1]}' = '${src.kv[parts[1]]}' (from ${src.id} in ${(src.latency).toFixed(3)}ms)`);
+      else     evLog('warn', `[NOT FOUND] Key '${parts[1]}' not present`);
+      break;
 
-      onlineNodes.forEach(peer => {
-        if (peer.id !== node.id && peer.online) {
-          if (peer.term < node.term) {
-            peer.term = node.term;
-            peer.role = 'FOLLOWER';
-            peer.votedFor = node.id;
-            votes++;
-          }
-        }
-      });
-
-      if (votes >= majority && node.online) {
-        node.role = 'LEADER';
-        logMsg('OK', `🏆 Node ${node.id} won quorum (${votes}/${cluster.length} votes) -> Elected LEADER for Term ${node.term}`);
-      }
-    }
-
-    // --- Actions ---
-    function proposeWrite(op, key, val) {
-      const leader = cluster.find(n => n.online && n.role === 'LEADER');
-      if (!leader) {
-        logMsg('CHAOS', `[FAILED] No active leader. Proposal rejected (Cluster has no quorum).`);
-        return false;
-      }
-
-      const entryIndex = leader.log.length;
-      const crc = makeCRC32(`${op}:${key}:${val}:${entryIndex}:${leader.term}`);
-      const entry = { index: entryIndex, term: leader.term, op, key, val, crc };
-
-      leader.log.push(entry);
-
-      // Replicate to followers
-      let acks = 1;
-      cluster.forEach(peer => {
-        if (peer.online && peer.id !== leader.id) {
-          peer.log.push(entry);
-          acks++;
-        }
-      });
-
-      const majority = Math.floor(cluster.length / 2) + 1;
-      if (acks >= majority) {
-        leader.commitIndex = entryIndex;
-        leader.lastApplied = entryIndex;
-
-        cluster.forEach(peer => {
-          if (peer.online) {
-            peer.commitIndex = entryIndex;
-            peer.lastApplied = entryIndex;
-            if (op === 'SET') {
-              peer.kv[key] = val;
-            } else if (op === 'DEL') {
-              delete peer.kv[key];
-            }
-          }
-        });
-
-        logMsg('OK', `[COMMITTED] ${op} '${key}'${val ? " = '" + val + "'" : ""} replicated to ${acks}/${cluster.length} nodes (CRC32: 0x${crc}) via ${leader.addr}`);
-        return true;
-      }
-      return false;
-    }
-
-    function killNode(id) {
-      const node = cluster.find(n => n.id === id);
-      if (!node) return;
-      node.online = false;
-      const wasLeader = node.role === 'LEADER';
-      node.role = 'FOLLOWER';
-      logMsg('CHAOS', `[CHAOS] Killed ${node.id} (${wasLeader ? 'WAS ACTIVE LEADER' : 'Follower'})`);
-    }
-
-    function spawnNode(id) {
-      const node = cluster.find(n => n.id === id);
-      if (!node) return;
-      node.online = true;
-      node.electionTimer = node.randomTimeout();
-      
-      // Catch up with leader
-      const leader = cluster.find(n => n.online && n.role === 'LEADER');
-      if (leader) {
-        node.term = leader.term;
-        node.log = [...leader.log];
-        node.kv = { ...leader.kv };
-        node.commitIndex = leader.commitIndex;
-        node.lastApplied = leader.lastApplied;
-      }
-      logMsg('OK', `[RECOVERY] Replayed WAL & Spawned ${node.id} (Rejoined quorum as FOLLOWER)`);
-    }
-
-    function executeAction(cmd) {
-      document.getElementById('cliInput').value = cmd;
-      handleCommand();
-    }
-
-    function handleCommand() {
-      const input = document.getElementById('cliInput');
-      const line = input.value.trim();
-      if (!line) return;
-      input.value = '';
-
-      const parts = line.split(' ');
-      const cmd = parts[0].toLowerCase();
-
-      if (cmd === 'set' && parts.length >= 3) {
-        proposeWrite('SET', parts[1], parts.slice(2).join(' '));
-      } else if ((cmd === 'del' || cmd === 'delete') && parts.length >= 2) {
-        proposeWrite('DEL', parts[1], '');
-      } else if (cmd === 'get' && parts.length >= 2) {
-        const key = parts[1];
-        const online = cluster.find(n => n.online);
-        if (online && online.kv[key]) {
-          logMsg('OK', `[FOUND] Key '${key}' = '${online.kv[key]}' (read from ${online.id})`);
-        } else {
-          logMsg('WARN', `[NOT FOUND] Key '${key}' does not exist.`);
-        }
-      } else if (cmd === 'kill') {
-        const target = (parts[1] || '').toLowerCase();
-        if (target === 'leader') {
-          const leader = cluster.find(n => n.online && n.role === 'LEADER');
-          if (leader) killNode(leader.id);
-        } else {
-          killNode(target.startsWith('node') ? target : 'node' + target);
-        }
-      } else if (cmd === 'spawn' || cmd === 'revive') {
-        const target = (parts[1] || '').toLowerCase();
-        if (target === 'all') {
-          cluster.forEach(n => spawnNode(n.id));
-        } else {
-          spawnNode(target.startsWith('node') ? target : 'node' + target);
-        }
-      } else if (cmd === 'bench') {
-        let count = parseInt(parts[1]) || 10;
-        logMsg('INFO', `Running concurrent benchmark: ${count} writes...`);
-        let done = 0;
-        for (let i = 0; i < count; i++) {
-          setTimeout(() => {
-            if (proposeWrite('SET', `bench_${i}`, `val_${Math.random().toString(36).substring(7)}`)) {
-              done++;
-            }
-          }, i * 50);
-        }
+    case 'KILL': {
+      const tgt = (parts[1] || 'leader').toLowerCase();
+      if (tgt === 'leader') {
+        const l = nodes.find(n => n.online && n.role === 'LEADER');
+        if (l) crashNode(l.id);
+        else evLog('warn', '[WARN] No active leader to kill');
       } else {
-        logMsg('WARN', `Unknown command '${line}'. Try: set <k> <v>, get <k>, del <k>, kill leader, spawn node1, bench`);
+        crashNode(tgt.startsWith('node') ? tgt : 'node' + tgt);
       }
+      break;
     }
 
-    // --- Render Loop ---
-    function renderUI() {
-      const container = document.getElementById('nodesContainer');
-      container.innerHTML = '';
+    case 'KILL-LEADER': case 'KILLLEADER': {
+      const l = nodes.find(n => n.online && n.role === 'LEADER');
+      if (l) crashNode(l.id);
+      else evLog('warn', '[WARN] No active leader');
+      break;
+    }
 
-      cluster.forEach(node => {
-        const card = document.createElement('div');
-        let roleClass = node.role.toLowerCase();
-        if (!node.online) roleClass = 'offline';
-        card.className = `node-card ${roleClass}`;
+    case 'SPAWN': case 'REVIVE': case 'START-NODE': {
+      const tgt = (parts[1] || '').toLowerCase();
+      if (!tgt || tgt === 'all') {
+        nodes.forEach(n => spawnNode(n.id));
+      } else {
+        spawnNode(tgt.startsWith('node') ? tgt : 'node' + tgt);
+      }
+      break;
+    }
 
-        const pct = Math.max(0, Math.min(100, (node.electionTimer / node.electionTimeout) * 100));
-
-        card.innerHTML = `
-          <div class="node-header">
-            <div class="node-title">
-              <span class="status-dot"></span>
-              <span>${node.id.toUpperCase()}</span>
-            </div>
-            <span class="badge ${node.online ? (node.role === 'LEADER' ? 'badge-green' : 'badge-cyan') : 'badge-red'}">
-              ${node.online ? node.role : 'OFFLINE'}
-            </span>
-          </div>
-          <div class="node-body">
-            <div class="metric-row">
-              <span class="metric-label">Address</span>
-              <span class="metric-val" style="color: var(--cyan);">${node.addr}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">Raft Term</span>
-              <span class="metric-val">${node.term}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">Commit / Applied</span>
-              <span class="metric-val">#${node.commitIndex} / #${node.lastApplied}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">WAL Entries</span>
-              <span class="metric-val">${node.log.length}</span>
-            </div>
-            ${node.online && node.role !== 'LEADER' ? `
-              <div>
-                <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-dim);">
-                  <span>Election Timeout</span>
-                  <span>${Math.round(node.electionTimer)}ms</span>
-                </div>
-                <div class="timer-bar-container">
-                  <div class="timer-bar" style="width: ${pct}%;"></div>
-                </div>
-              </div>
-            ` : ''}
-          </div>
-          <div class="node-actions">
-            ${node.online ? `
-              <button class="btn-danger" style="flex:1" onclick="killNode('${node.id}')">Crash Node</button>
-            ` : `
-              <button class="btn-success" style="flex:1" onclick="spawnNode('${node.id}')">Revive Node</button>
-            `}
-          </div>
-        `;
-        container.appendChild(card);
-      });
-
-      // Render KV Table
-      const allKeys = new Set();
-      cluster.forEach(n => {
-        if (n.online) {
-          Object.keys(n.kv).forEach(k => allKeys.add(k));
+    case 'BENCH': case 'BENCHMARK': {
+      const count = parseInt(parts[1]) || 10;
+      const conc  = parseInt(parts[2]) || 4;
+      evLog('info', `[BENCH] Starting ${count} writes · ${conc} workers`);
+      let done = 0, ok = 0;
+      const start = Date.now();
+      const doOne = (i) => {
+        if (propose('SET', `bench_k${i}`, `val_${Math.random().toString(36).slice(2,7)}`)) ok++;
+        done++;
+        if (done === count) {
+          const elapsed = ((Date.now() - start) / 1000).toFixed(2);
+          const ops = (ok / elapsed).toFixed(1);
+          evLog('ok', `[BENCH] Done: ${ok}/${count} committed · ${elapsed}s · ~${ops} ops/sec`);
         }
-      });
-
-      const kvBody = document.getElementById('kvTableBody');
-      if (allKeys.size === 0) {
-        kvBody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">No keys stored yet. Type 'SET user Alice' above.</td></tr>`;
-      } else {
-        kvBody.innerHTML = '';
-        Array.from(allKeys).sort().forEach(k => {
-          const tr = document.createElement('tr');
-          let cols = `<td><strong>${k}</strong></td>`;
-          cluster.forEach(n => {
-            if (!n.online) {
-              cols += `<td class="val-offline">[OFFLINE]</td>`;
-            } else if (n.kv[k] !== undefined) {
-              cols += `<td class="val-active">${n.kv[k]}</td>`;
-            } else {
-              cols += `<td class="val-nil">&lt;nil&gt;</td>`;
-            }
-          });
-          tr.innerHTML = cols;
-          kvBody.appendChild(tr);
-        });
-      }
-      document.getElementById('keyCountBadge').innerText = `${allKeys.size} key${allKeys.size === 1 ? '' : 's'}`;
-
-      // Render WAL Table (from leader or first online node)
-      const refNode = cluster.find(n => n.online && n.role === 'LEADER') || cluster.find(n => n.online) || cluster[0];
-      const walBody = document.getElementById('walTableBody');
-      if (refNode.log.length === 0) {
-        walBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">WAL is currently empty. Writes will be replicated and checksummed here.</td></tr>`;
-      } else {
-        walBody.innerHTML = '';
-        refNode.log.slice(-8).reverse().forEach(entry => {
-          const tr = document.createElement('tr');
-          const isCommitted = entry.index <= refNode.commitIndex;
-          tr.innerHTML = `
-            <td>#${entry.index}</td>
-            <td>Term ${entry.term}</td>
-            <td style="color: ${entry.op === 'DEL' ? 'var(--red)' : 'var(--green)'}; font-weight:600;">${entry.op}</td>
-            <td>${entry.key} ${entry.val ? '= ' + entry.val : ''}</td>
-            <td style="color: var(--cyan); font-family: monospace;">0x${entry.crc}</td>
-            <td><span class="badge ${isCommitted ? 'badge-green' : 'badge-cyan'}">${isCommitted ? 'COMMITTED' : 'UNCOMMITTED'}</span></td>
-          `;
-          walBody.appendChild(tr);
-        });
-      }
-      document.getElementById('walCountBadge').innerText = `${refNode.log.length} entries`;
+      };
+      for (let i = 0; i < count; i++) setTimeout(() => doOne(i), i * 55);
+      break;
     }
-  </script>
+
+    case 'PING': {
+      nodes.forEach(n => {
+        if (n.online) evLog('ok', `[PONG] ${n.id} (127.0.0.1:${n.port}) in ${n.latency.toFixed(3)}ms`);
+        else          evLog('warn', `[OFFLINE] ${n.id} (127.0.0.1:${n.port})`);
+      });
+      break;
+    }
+
+    case 'LEADER': {
+      const l = nodes.find(n => n.online && n.role === 'LEADER');
+      if (l) evLog('ok', `[LEADER] ${l.id} on 127.0.0.1:${l.port} (Term ${l.term})`);
+      else   evLog('warn', '[WARN] No active leader detected');
+      break;
+    }
+
+    case 'STATUS': case 'INFO': {
+      nodes.forEach(n => {
+        const st = n.online
+          ? `NODE ${n.id} ROLE ${n.role} TERM ${n.term} COMMIT ${n.commitIndex} APPLIED ${n.lastApplied} LOGLEN ${n.log.length}`
+          : `NODE ${n.id} ROLE OFFLINE`;
+        evLog(n.online ? 'ok' : 'warn', st);
+      });
+      break;
+    }
+
+    default:
+      evLog('warn', `[UNKNOWN] '${raw}' — try: set <k> <v>, get <k>, del <k>, kill leader, spawn node2, bench 20, ping, status`);
+  }
+}
+
+// ── Event log ─────────────────────────────────────────────────────────────────
+function evLog(type, msg) {
+  const el  = document.getElementById('evLog');
+  const div = document.createElement('div');
+  div.className = 'ev';
+  const cls = { ok: 'ev-ok', warn: 'ev-warn', err: 'ev-err', info: 'ev-info' }[type] || 'ev-info';
+  div.innerHTML = `<span class="ev-t">${nowStr()}</span><span class="ev-tag ${cls}">${msg.match(/^\[[\w-]+\]/)?.[0] || '[INFO]'}</span><span class="ev-msg">${msg.replace(/^\[[\w-]+\]\s*/, '')}</span>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  renderNodes();
+  renderKV();
+  renderWAL();
+  renderHeader();
+}
+
+function renderNodes() {
+  const grid = document.getElementById('nodeGrid');
+  grid.innerHTML = '';
+
+  nodes.forEach(n => {
+    const pct = (n.online && n.role !== 'LEADER')
+      ? Math.max(0, Math.min(100, (n.et / n.etMax) * 100))
+      : 100;
+
+    const roleLabel = n.online ? n.role : 'OFFLINE';
+    const roleClass = {
+      LEADER: 'r-leader', FOLLOWER: 'r-follower', CANDIDATE: 'r-candidate'
+    }[n.role] || (n.online ? 'r-follower' : 'r-offline');
+    const dotClass = !n.online ? ' red' : n.role === 'CANDIDATE' ? ' yellow' : '';
+
+    const card = document.createElement('div');
+    card.className = `node-card${n.role === 'LEADER' && n.online ? ' leader' : ''}${!n.online ? ' offline' : ''}`;
+
+    card.innerHTML = `
+      <div class="node-head">
+        <div class="node-id">
+          <span class="blink${dotClass}"></span>
+          ${n.id}
+        </div>
+        <span class="role-badge ${n.online ? roleClass : 'r-offline'}">[${roleLabel}]</span>
+      </div>
+      <div class="node-body">
+        <div class="node-row">
+          <span class="k">addr</span>
+          <span class="v cyan">127.0.0.1:${n.port}</span>
+        </div>
+        <div class="node-row">
+          <span class="k">term</span>
+          <span class="v">${n.term}</span>
+        </div>
+        <div class="node-row">
+          <span class="k">commit / applied</span>
+          <span class="v">${n.commitIndex} / ${n.lastApplied}</span>
+        </div>
+        <div class="node-row">
+          <span class="k">log entries</span>
+          <span class="v${n.log.length > 0 ? ' green' : ''}">${n.log.length}</span>
+        </div>
+        <div class="node-row">
+          <span class="k">latency</span>
+          <span class="v">${n.online ? n.latency.toFixed(3) + 'ms' : '—'}</span>
+        </div>
+      </div>
+      ${n.online && n.role !== 'LEADER' ? `
+        <div class="et-block">
+          <div class="et-labels">
+            <span>election timer</span>
+            <span>${Math.round(n.et)}ms</span>
+          </div>
+          <div class="et-track"><div class="et-fill" style="width:${pct}%"></div></div>
+        </div>
+      ` : '<div style="height:10px"></div>'}
+      <div class="node-foot">
+        ${n.online
+          ? `<button class="node-action crash"  onclick="crashNode('${n.id}')">crash node</button>`
+          : `<button class="node-action revive" onclick="spawnNode('${n.id}')">spawn &amp; replay wal</button>`
+        }
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function renderKV() {
+  const allKeys = [...new Set(nodes.flatMap(n => n.online ? Object.keys(n.kv) : []))].sort();
+  const tbody   = document.getElementById('kvTbody');
+  const meta    = document.getElementById('kvMeta');
+  meta.textContent = `${allKeys.length} key${allKeys.length !== 1 ? 's' : ''}`;
+
+  if (!allKeys.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">no keys stored yet — SET something above</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = allKeys.map(k =>
+    `<tr>
+      <td class="td-key">${k}</td>
+      ${nodes.map(n => {
+        if (!n.online) return `<td class="td-offline">[OFFLINE]</td>`;
+        const v = n.kv[k];
+        return v !== undefined ? `<td class="td-val-ok">${v}</td>` : `<td class="td-nil">—</td>`;
+      }).join('')}
+    </tr>`
+  ).join('');
+}
+
+function renderWAL() {
+  // Use leader's log as canonical source (matches Go LOGS command)
+  const src   = nodes.find(n => n.online && n.role === 'LEADER')
+               || nodes.find(n => n.online)
+               || nodes[0];
+  const tbody = document.getElementById('walTbody');
+  const meta  = document.getElementById('walMeta');
+  meta.textContent = `${src.log.length} entr${src.log.length === 1 ? 'y' : 'ies'}`;
+
+  if (!src.log.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="6">log is empty</td></tr>';
+    return;
+  }
+
+  // Show most recent first, cap at 12 rows
+  tbody.innerHTML = [...src.log].reverse().slice(0, 12).map(e => {
+    const committed   = e.index <= src.commitIndex;
+    const opClass     = e.op === 'DEL' ? 'wal-op-del' : 'wal-op-set';
+    const payload     = e.val ? `${e.key} = ${e.val}` : e.key;
+    const commitLabel = committed
+      ? `<span class="commit-tag ct-committed">[COMMITTED]</span>`
+      : `<span class="commit-tag ct-pending">[UNCOMMITTED]</span>`;
+    return `
+      <tr>
+        <td>#${e.index}</td>
+        <td>Term ${e.term}</td>
+        <td class="${opClass}">${e.op}</td>
+        <td>${payload}</td>
+        <td class="wal-crc">0x${e.checksum}</td>
+        <td>${commitLabel}</td>
+      </tr>`;
+  }).join('');
+}
+
+function renderHeader() {
+  const online    = nodes.filter(n => n.online).length;
+  const hasLeader = nodes.some(n => n.online && n.role === 'LEADER');
+  const electing  = nodes.some(n => n.online && n.role === 'CANDIDATE');
+
+  const dot   = document.getElementById('clusterDot');
+  const label = document.getElementById('clusterLabel');
+
+  if (online === 0) {
+    dot.className = 'blink red';
+    label.textContent = 'all nodes offline';
+  } else if (electing) {
+    dot.className = 'blink yellow';
+    label.textContent = 'electing leader…';
+  } else if (!hasLeader) {
+    dot.className = 'blink yellow';
+    label.textContent = `${online}/${nodes.length} nodes — no leader`;
+  } else {
+    dot.className = 'blink';
+    label.textContent = `${online}/${nodes.length} nodes online`;
+  }
+}
+</script>
 </body>
 </html>
